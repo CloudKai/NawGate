@@ -336,4 +336,75 @@ describe("Runtime API boundary", () => {
     expect(approved.statusCode).toBe(200);
     expect(approved.json()).toMatchObject({ approval: { status: "approved" } });
   });
+
+  it("serves flight replay data to agent owner and denies unauthorized principals", async () => {
+    const { app } = await makeRuntimeApp();
+    const authHeaders = { authorization: "Bearer outer-token-for-tests" };
+    const agentId = "00000000-0000-4000-8000-000000000001";
+    const runId = "00000000-0000-4000-8000-000000000002";
+
+    const actorASession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-a" },
+    });
+    const actorAToken = (actorASession.json() as { sessionToken: string }).sessionToken;
+
+    const actorBSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-b" },
+    });
+    const actorBToken = (actorBSession.json() as { sessionToken: string }).sessionToken;
+
+    // Record flight data for this agent & run
+    const { recordFlightData } = await import("./agentgate/flight-recorder.js");
+    const { dataDirectory } = loadConfig({ NODE_ENV: "test" });
+    await recordFlightData(
+      {
+        runId,
+        agentId,
+        ownerUserId: "user-a",
+        prompt: "Check status with key sk-123456789012345678901234",
+        output: "All systems healthy.",
+        error: null,
+        status: "completed",
+        usage: { inputTokens: 15, outputTokens: 8 },
+        startedAt: "2026-08-30T10:00:00.000Z",
+        completedAt: "2026-08-30T10:00:01.200Z",
+        durationMs: 1200,
+        auditEvents: [],
+      },
+      dataDirectory,
+    );
+
+    // User A (Owner) fetches replay
+    const ownerFetch = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}/replays/${runId}`,
+      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+    });
+    expect(ownerFetch.statusCode).toBe(200);
+    const replay = (ownerFetch.json() as { replay: { runId: string; prompt: string } }).replay;
+    expect(replay.runId).toBe(runId);
+    expect(replay.prompt).toBe("Check status with key [REDACTED_OPENAI_KEY]");
+
+    // User B (Unauthorized) attempts to fetch replay
+    const unauthorizedFetch = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}/replays/${runId}`,
+      headers: { ...authHeaders, "x-agentgate-session": actorBToken },
+    });
+    expect(unauthorizedFetch.statusCode).toBe(404);
+
+    // Non-existent replay
+    const missingFetch = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}/replays/00000000-0000-4000-8000-000000000099`,
+      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+    });
+    expect(missingFetch.statusCode).toBe(404);
+  });
 });

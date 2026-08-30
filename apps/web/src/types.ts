@@ -98,3 +98,23 @@ export interface AuditEvent {
   enforcementPoint: string | null;
   protectedActionExecuted: boolean | null;
 }
+
+export interface ReplayPayload {
+  runId: string;
+  agentId: string;
+  ownerUserId: HumanId;
+  prompt: string;
+  output: string | null;
+  error: string | null;
+  status: RunStatus;
+  usage: {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+  } | null;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  auditEvents: AuditEvent[];
+}
+

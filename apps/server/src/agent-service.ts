@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { maskSensitiveData } from "./agentgate/dlp-service.js";
 import type { AppConfig } from "./config.js";
 import { isModelConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
@@ -191,13 +192,14 @@ export class AgentService {
         "The selected model provider is not configured. Set its API key and model, then restart.",
       );
     }
+    const sanitizedPrompt = maskSensitiveData(prompt);
     const timestamp = now();
     const runId = randomUUID();
     const run: AgentRun = {
       id: runId,
       agentId,
       status: "queued",
-      prompt,
+      prompt: sanitizedPrompt,
       output: null,
       error: null,
       usage: null,
@@ -210,7 +212,7 @@ export class AgentService {
       agentId,
       runId,
       role: "user",
-      content: prompt,
+      content: sanitizedPrompt,
       createdAt: timestamp,
     };
     const agentAtStart = await this.store.mutate((database) => {
@@ -290,12 +292,13 @@ export class AgentService {
         threadId: agentAtStart.codexThreadId,
       });
       const completedAt = now();
+      const sanitizedOutput = maskSensitiveData(result.output);
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);
         if (!storedRun || !agent) return;
         storedRun.status = "completed";
-        storedRun.output = result.output;
+        storedRun.output = sanitizedOutput;
         storedRun.usage = result.usage;
         storedRun.completedAt = completedAt;
         database.messages.push({
@@ -303,7 +306,7 @@ export class AgentService {
           agentId: agent.id,
           runId: run.id,
           role: "assistant",
-          content: result.output,
+          content: sanitizedOutput,
           createdAt: completedAt,
         });
         agent.status = "ready";
@@ -314,7 +317,8 @@ export class AgentService {
     } catch (error) {
       const completedAt = now();
       const cancelled = error instanceof RunCancelledError;
-      const message = error instanceof Error ? error.message : String(error);
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      const message = maskSensitiveData(rawMessage);
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);

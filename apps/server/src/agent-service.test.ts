@@ -9,7 +9,9 @@ import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 
 class FakeRunner implements AgentRunner {
+  nextResult: RunnerResult | null = null;
   async run(request: RunnerRequest): Promise<RunnerResult> {
+    if (this.nextResult) return this.nextResult;
     return {
       output: "Completed: " + request.prompt,
       threadId: request.threadId ?? "fake-thread",
@@ -153,4 +155,39 @@ describe("Agent lifecycle", () => {
     await expect(service.deleteAgent(agent.id, userB)).rejects.toMatchObject({ statusCode: 404 });
     expect(service.getAgent(agent.id, userA).name).toBe("Private");
   });
+
+  it("sanitizes user prompts and runner output using DLP Proxy", async () => {
+    const runner = new FakeRunner();
+    runner.nextResult = {
+      output: "Here is the OpenAI key: sk-abcdef12345678901234567890 for your request.",
+      threadId: "thread-dlp",
+      usage: { inputTokens: 10, outputTokens: 20 },
+    };
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "DLP Agent" }, userA);
+    const { run, message } = await service.sendMessage(
+      agent.id,
+      "Please connect using ark-123456789012345678901234567890 and email test@example.com",
+      userA,
+    );
+    expect(message.content).toBe(
+      "Please connect using [REDACTED_ARK_KEY] and email [REDACTED_EMAIL]",
+    );
+    expect(run.prompt).toBe(
+      "Please connect using [REDACTED_ARK_KEY] and email [REDACTED_EMAIL]",
+    );
+
+    // Wait for async runner execution
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const messages = service.getMessages(agent.id, userA);
+    expect(messages).toHaveLength(2);
+    expect(messages[1].content).toBe(
+      "Here is the OpenAI key: [REDACTED_OPENAI_KEY] for your request.",
+    );
+    const updatedRun = service.getRun(run.id, userA);
+    expect(updatedRun.output).toBe(
+      "Here is the OpenAI key: [REDACTED_OPENAI_KEY] for your request.",
+    );
+  });
 });
+

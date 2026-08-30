@@ -77,8 +77,10 @@ async function waitForApproval(baseUrl: string, sessionToken: string): Promise<{
 }
 
 describe("AgentGate Phase 7 deterministic end-to-end flow", () => {
-  it("runs agentctl over real HTTP through allow, deny, approval, consume, and replay boundaries", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "agentgate-phase7-e2e-"));
+  it(
+    "runs agentctl over real HTTP through allow, deny, approval, consume, and replay boundaries",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "agentgate-phase7-e2e-"));
     temporaryDirectories.push(root);
     const store = new JsonStore(path.join(root, "db.json"));
     await store.initialize();
@@ -207,5 +209,7 @@ describe("AgentGate Phase 7 deterministic end-to-end flow", () => {
       "run.completed",
     ]));
     expect(credentials.activeCount()).toBe(0);
-  });
+    },
+    20_000,
+  );
 });

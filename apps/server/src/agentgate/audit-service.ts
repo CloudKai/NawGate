@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { maskSensitiveData } from "./dlp-service.js";
 import type {
   AgentGateAction,
   AuditDecision,
@@ -52,11 +53,12 @@ export class AuditService {
       id: randomUUID(),
       createdAt: this.now(),
       ...input,
+      reasonCode: input.reasonCode ? maskSensitiveData(input.reasonCode) : null,
       resourceId: safeResourceId,
       policyVersion:
         input.policyVersion ??
         (input.eventType.startsWith("policy.") ? AGENTGATE_POLICY_VERSION : null),
-      explanation: input.explanation ?? null,
+      explanation: input.explanation ? maskSensitiveData(input.explanation) : null,
       enforcementPoint: input.enforcementPoint ?? null,
       protectedActionExecuted: input.protectedActionExecuted ?? null,
     };
