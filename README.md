@@ -77,7 +77,7 @@ protected actions through a trusted backend authorization boundary.
 
 [![AgentGate architecture](docs/agentgate/architecture-share.png)](https://cloudkai.github.io/CodeJam/agentgate/architecture.html)
 
-Explore the [interactive AgentGate architecture](https://cloudkai.github.io/CodeJam/agentgate/architecture.html)
+Explore the [interactive AgentGate architecture](https://cloudkai.github.io/CodeJam/docs/agentgate/architecture.html)
 or read the [GitHub-friendly architecture overview](docs/agentgate/architecture.md).
 
 ## Requirements
