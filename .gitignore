@@ -1,7 +1,14 @@
 node_modules/
 dist/
-.env
-.env.production
+
+# Local secrets and environment overrides. Keep the safe template tracked.
+.env*
+!.env.example
+
+# Local planning/design artifacts.
+/context/
+/design/
+
 .data/
 .local/
 data/
