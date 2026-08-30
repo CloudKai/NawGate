@@ -12,6 +12,10 @@ import { AuditService } from "./agentgate/audit-service.js";
 import { IdentityService } from "./agentgate/identity-service.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
+import {
+  SECURITY_LAB_SCENARIOS,
+  SecurityLabService,
+} from "./agentgate/security-lab-service.js";
 import { AGENTGATE_POLICY_VERSION, type GatewayResult, type TrustedRuntimeContext } from "./agentgate/types.js";
 import type { AgentService } from "./agent-service.js";
 
@@ -52,6 +56,10 @@ const teamGrantBody = z.object({
   expiresAt: z.string().datetime().nullable().optional(),
 }).strict();
 const grantIdParams = z.object({ id: z.string().uuid(), grantId: z.string().uuid() });
+const securityLabScenarioParams = z.object({ id: z.string().uuid(), scenarioId: z.string().uuid() });
+const securityLabBody = z.object({
+  scenario: z.enum(SECURITY_LAB_SCENARIOS),
+}).strict();
 
 const RUNTIME_POLL_AFTER_MS = 1_000;
 
@@ -61,6 +69,7 @@ export interface RuntimeApiDependencies {
   approvals: ApprovalService;
   audit: AuditService;
   grants?: AgentTeamGrantService;
+  securityLab?: SecurityLabService;
 }
 
 function runtimeContext(
@@ -94,6 +103,23 @@ function publicGatewayCode(reasonCode: string): string {
   return "ACTION_NOT_PERMITTED";
 }
 
+function rejectedRuntimeFieldNames(error: z.ZodError): string[] {
+  const safeNames = new Set([
+    "requestId", "action", "resourceId", "approvalId", "humanId", "ownerUserId", "agentId", "runId",
+    "teamId", "role", "memberships", "agentGrants", "policyOutcome",
+  ]);
+  const names = new Set<string>();
+  for (const issue of error.issues) {
+    for (const segment of issue.path) {
+      if (typeof segment === "string") names.add(safeNames.has(segment) ? segment : "invalid_field");
+    }
+    if (issue.code === "unrecognized_keys") {
+      for (const key of issue.keys) names.add(safeNames.has(key) ? key : "unknown_field");
+    }
+  }
+  return [...names].slice(0, 8);
+}
+
 function sendRuntimeResult(reply: {
   code: (statusCode: number) => { send: (payload: unknown) => unknown };
   send: (payload: unknown) => unknown;
@@ -116,6 +142,7 @@ function sendRuntimeResult(reply: {
       requestId: result.requestId,
       approvalId: result.approvalId,
       pollAfterMs: RUNTIME_POLL_AFTER_MS,
+      reasonCode: result.reasonCode,
     });
   }
   if (result.status === "denied") {
@@ -236,6 +263,27 @@ export async function createApp(
   app.get("/api/demo/me", async (request) => ({ user: humanActor(request) }));
 
   if (runtime) {
+    if (runtime.securityLab && config.securityLabEnabled) {
+      app.post("/api/agents/:id/security-lab", async (request) => {
+        const { id } = agentIdParams.parse(request.params);
+        const { scenario } = securityLabBody.parse(request.body);
+        const actor = humanActor(request);
+        service.getAgent(id, actor);
+        return runtime.securityLab!.run(scenario, id, actor);
+      });
+      app.post("/api/agents/:id/security-lab/:scenarioId/continue", async (request) => {
+        const { id, scenarioId } = securityLabScenarioParams.parse(request.params);
+        const actor = humanActor(request);
+        service.getAgent(id, actor);
+        return runtime.securityLab!.continueJit(scenarioId, id, actor);
+      });
+      app.post("/api/agents/:id/security-lab/:scenarioId/cancel", async (request) => {
+        const { id, scenarioId } = securityLabScenarioParams.parse(request.params);
+        const actor = humanActor(request);
+        service.getAgent(id, actor);
+        return runtime.securityLab!.cancelJit(scenarioId, id, actor);
+      });
+    }
     if (runtime.grants) {
       app.get("/api/agents/:id/team-grants", async (request) => {
         const { id } = agentIdParams.parse(request.params);
@@ -330,9 +378,34 @@ export async function createApp(
     });
 
     app.post("/api/runtime/actions", async (request, reply) => {
-      const body = runtimeActionBody.parse(request.body);
       const context = runtimeContext(request, runtime);
       if (!context) return;
+      const parsed = runtimeActionBody.safeParse(request.body);
+      if (!parsed.success) {
+        await runtime.audit.record({
+          eventType: "runtime.request_rejected",
+          humanId: context.humanId,
+          agentId: context.agentId,
+          runId: context.runId,
+          requestId: null,
+          action: null,
+          resourceId: null,
+          decision: "deny",
+          risk: "high",
+          reasonCode: "invalid_runtime_request",
+          approvalId: null,
+          capabilityId: null,
+          status: "failure",
+          durationMs: null,
+          policyVersion: AGENTGATE_POLICY_VERSION,
+          explanation: "The RuntimeGateway API boundary rejected untrusted malformed request attributes.",
+          enforcementPoint: "RuntimeGateway/API boundary",
+          protectedActionExecuted: false,
+          rejectedFieldNames: rejectedRuntimeFieldNames(parsed.error),
+        });
+        throw parsed.error;
+      }
+      const body = parsed.data;
       const result = await runtime.gateway.execute(context, {
         requestId: body.requestId,
         action: body.action,

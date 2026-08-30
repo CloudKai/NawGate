@@ -89,6 +89,14 @@ export interface ApprovalRecord {
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
+  grantId?: string;
+  teamId?: "team-alpha" | "team-beta";
+  bundleVersion?: number;
+  effectiveScope?: string[];
+  humanRole?: "viewer" | "editor" | "admin";
+  agentRole?: "viewer" | "editor" | "admin";
+  resourceClassification?: "internal" | "sensitive" | "restricted";
+  temporaryScope?: string[];
 }
 
 export interface AuditEvent {
@@ -116,4 +124,44 @@ export interface AuditEvent {
   teamId: "team-alpha" | "team-beta" | null;
   bundleVersion: number | null;
   effectiveScope: string[] | null;
+  humanRole: "viewer" | "editor" | "admin" | null;
+  agentRole: "viewer" | "editor" | "admin" | null;
+  resourceClassification: "internal" | "sensitive" | "restricted" | null;
+  temporaryScope: string[] | null;
+  rejectedFieldNames: string[] | null;
+}
+
+export type SecurityLabScenario =
+  | "own-project"
+  | "cross-user-project"
+  | "alpha-internal"
+  | "alpha-restricted-jit"
+  | "beta-cross-team"
+  | "forged-team-admin"
+  | "replay-consumed-approval"
+  | "revoke-active-run"
+  | "revoke-grant"
+  | "queued-after-revoke";
+
+export interface SecurityLabResult {
+  scenario: SecurityLabScenario;
+  scenarioId: string | null;
+  humanId: HumanId;
+  agentId: string;
+  runId: string;
+  requestId: string;
+  action: string;
+  resourceId: string;
+  teamId: "team-alpha" | "team-beta" | null;
+  status: "success" | "denied" | "approval_required" | "failed" | "conflict";
+  decision: "allow" | "deny" | "require_approval";
+  initialDecision: "allow" | "deny" | "require_approval" | null;
+  operationState: "terminal" | "pending_approval" | "queued";
+  revocationPerformed: boolean;
+  reasonCode: string;
+  approvalId: string | null;
+  policyVersion: string;
+  enforcementPoint: string;
+  protectedActionExecuted: boolean;
+  summary: string;
 }

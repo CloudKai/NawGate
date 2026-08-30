@@ -9,6 +9,7 @@ import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
 import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
+import { SecurityLabService } from "./agentgate/security-lab-service.js";
 import { createApp, type RuntimeApiDependencies } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { AgentService } from "./agent-service.js";
@@ -90,24 +91,30 @@ async function makeRuntimeApp(): Promise<{
   const resources = new ProtectedResourceService(store);
   const credentials = new RuntimeCredentialService();
   const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
+  const gateway = new RuntimeGateway(
+    new DeterministicPolicyEngine(),
+    resources,
+    audit,
+    approvals,
+    store,
+    undefined,
+    grants,
+    credentials,
+  );
   const runtime: RuntimeApiDependencies = {
     credentials,
     approvals,
     audit,
     grants,
-    gateway: new RuntimeGateway(
-      new DeterministicPolicyEngine(),
-      resources,
-      audit,
-      approvals,
-      store,
-      undefined,
-      grants,
-      credentials,
-    ),
+    gateway,
+    securityLab: new SecurityLabService(gateway, approvals, audit, credentials, grants),
   };
   const app = await createApp(
-    loadConfig({ NODE_ENV: "test", APP_AUTH_TOKEN: "outer-token-for-tests" }),
+    loadConfig({
+      NODE_ENV: "test",
+      APP_AUTH_TOKEN: "outer-token-for-tests",
+      AGENTGATE_SECURITY_LAB_ENABLED: "true",
+    }),
     service,
     undefined,
     runtime,
@@ -121,6 +128,184 @@ function runtimeHeaders(token: string) {
 }
 
 describe("Runtime API boundary", () => {
+  it("runs Security Lab scenarios through the real gateway and returns safe evidence", async () => {
+    const { app, resources } = await makeRuntimeApp();
+    const ownProject = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-agentgate-session": "not-used-by-demo",
+      },
+      payload: { scenario: "own-project" },
+    });
+    expect(ownProject.statusCode).toBe(401);
+
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-agentgate-session": sessionToken,
+      },
+      payload: { scenario: "own-project" },
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({
+      scenario: "own-project",
+      decision: "allow",
+      reasonCode: "protected_action_succeeded",
+      protectedActionExecuted: true,
+      policyVersion: "bouncer-v4",
+    });
+    expect(JSON.stringify(result.json())).not.toContain("Synthetic profile for project-a");
+    expect(resources.getExecutionCount("resource.read", "project-a")).toBe(1);
+
+    const forged = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-agentgate-session": sessionToken,
+      },
+      payload: { scenario: "forged-team-admin" },
+    });
+    expect(forged.statusCode).toBe(200);
+    expect(forged.json()).toMatchObject({
+      scenario: "forged-team-admin",
+      decision: "deny",
+      reasonCode: "invalid_context",
+      protectedActionExecuted: false,
+    });
+    await app.close();
+  });
+
+  it("completes a Security Lab JIT Run without exposing a runtime credential", async () => {
+    const { app, runtime, resources, grants, store } = await makeRuntimeApp();
+    await grants.enroll(agentAId, { teamId: "team-alpha", role: "viewer" }, { id: "user-a", name: "User A" });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
+    const headers = { authorization: "Bearer outer-token-for-tests", "x-agentgate-session": sessionToken };
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers,
+      payload: { scenario: "alpha-restricted-jit" },
+    });
+    expect(started.statusCode).toBe(200);
+    const initial = started.json() as { scenarioId: string; approvalId: string; runId: string; status: string };
+    expect(initial).toMatchObject({ status: "approval_required" });
+    expect(initial.scenarioId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.stringify(initial)).not.toContain("x-agentgate-runtime");
+
+    await runtime.approvals.approve(initial.approvalId, "user-a");
+    const completed = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab/${initial.scenarioId}/continue`,
+      headers,
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toMatchObject({ status: "success", protectedActionExecuted: true });
+    expect(resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(1);
+    expect(runtime.credentials.isAuthorityRevoked(initial.runId)).toBe(true);
+    expect(store.snapshot().agentTeamGrants.find((grant) => grant.agentId === agentAId)).toMatchObject({
+      role: "viewer", status: "active", allowedActions: ["file.read"], bundleVersion: 1,
+    });
+    expect(await runtime.approvals.get(initial.approvalId)).toMatchObject({ status: "consumed" });
+  });
+
+  it("uses the real final recheck for queued Security Lab revocation and cleans up cancellation", async () => {
+    const { app, runtime, grants, resources } = await makeRuntimeApp();
+    await grants.enroll(agentAId, { teamId: "team-alpha", role: "viewer" }, { id: "user-a", name: "User A" });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const headers = {
+      authorization: "Bearer outer-token-for-tests",
+      "x-agentgate-session": (session.json() as { sessionToken: string }).sessionToken,
+    };
+    const queued = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers,
+      payload: { scenario: "queued-after-revoke" },
+    });
+    expect(queued.statusCode).toBe(200);
+    expect(queued.json()).toMatchObject({
+      initialDecision: "allow",
+      operationState: "queued",
+      revocationPerformed: true,
+      status: "denied",
+      reasonCode: "runtime_authority_revoked",
+      protectedActionExecuted: false,
+    });
+    expect(resources.getExecutionCount("resource.read", "project-a")).toBe(0);
+
+    const pending = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers,
+      payload: { scenario: "alpha-restricted-jit" },
+    });
+    const pendingBody = pending.json() as { scenarioId: string; runId: string };
+    const cancelled = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab/${pendingBody.scenarioId}/cancel`,
+      headers,
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json()).toMatchObject({ status: "denied", revocationPerformed: true });
+    expect(runtime.credentials.isAuthorityRevoked(pendingBody.runId)).toBe(true);
+  });
+
+  it("fails closed when approved JIT authority or its parent grant is revoked before retry", async () => {
+    const setupPendingJit = async () => {
+      const value = await makeRuntimeApp();
+      await value.grants.enroll(agentAId, { teamId: "team-alpha", role: "viewer" }, { id: "user-a", name: "User A" });
+      const session = await value.app.inject({
+        method: "POST", url: "/api/demo/session", headers: { authorization: "Bearer outer-token-for-tests" }, payload: { userId: "user-a" },
+      });
+      const headers = { authorization: "Bearer outer-token-for-tests", "x-agentgate-session": (session.json() as { sessionToken: string }).sessionToken };
+      const response = await value.app.inject({ method: "POST", url: `/api/agents/${agentAId}/security-lab`, headers, payload: { scenario: "alpha-restricted-jit" } });
+      const body = response.json() as { scenarioId: string; approvalId: string; runId: string };
+      await value.runtime.approvals.approve(body.approvalId, "user-a");
+      return { ...value, headers, body };
+    };
+
+    const revokedRun = await setupPendingJit();
+    revokedRun.runtime.credentials.revokeAuthority(revokedRun.body.runId);
+    const runRetry = await revokedRun.app.inject({
+      method: "POST", url: `/api/agents/${agentAId}/security-lab/${revokedRun.body.scenarioId}/continue`, headers: revokedRun.headers,
+    });
+    expect(runRetry.json()).toMatchObject({ status: "denied", reasonCode: "runtime_authority_revoked", protectedActionExecuted: false });
+    expect(revokedRun.resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(0);
+
+    const revokedGrant = await setupPendingJit();
+    const grant = revokedGrant.store.snapshot().agentTeamGrants.find((item) => item.agentId === agentAId && item.status === "active");
+    if (!grant) throw new Error("Expected active Team Alpha grant");
+    await revokedGrant.grants.revoke(agentAId, grant.id, { id: "user-a", name: "User A" });
+    const grantRetry = await revokedGrant.app.inject({
+      method: "POST", url: `/api/agents/${agentAId}/security-lab/${revokedGrant.body.scenarioId}/continue`, headers: revokedGrant.headers,
+    });
+    expect(grantRetry.json()).toMatchObject({ status: "denied", reasonCode: "agent_grant_revoked", protectedActionExecuted: false });
+    expect(revokedGrant.resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(0);
+  });
+
   it("skips browser auth for runtime requests but still requires a valid runtime credential", async () => {
     const { app, runtime } = await makeRuntimeApp();
     const missing = await app.inject({
@@ -265,6 +450,18 @@ describe("Runtime API boundary", () => {
       },
     });
     expect(forged.statusCode).toBe(400);
+    expect(runtime.audit.list("agent-a")).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventType: "runtime.request_rejected",
+        humanId: "user-a",
+        agentId: "agent-a",
+        runId: "run-a",
+        reasonCode: "invalid_runtime_request",
+        protectedActionExecuted: false,
+        rejectedFieldNames: expect.arrayContaining(["humanId", "ownerUserId", "agentId", "runId"]),
+      }),
+    ]));
+    expect(JSON.stringify(runtime.audit.list("agent-a"))).not.toContain("user-b");
   });
 
   it("routes team-file reads through the runtime credential and rejects the wrong team", async () => {
@@ -303,11 +500,25 @@ describe("Runtime API boundary", () => {
         resourceId: "team-alpha-restricted",
       },
     });
-    expect(restricted.statusCode).toBe(403);
+    expect(restricted.statusCode).toBe(202);
     expect(restricted.json()).toMatchObject({
-      status: "denied",
-      reasonCode: "agent_grant_role_insufficient",
+      status: "approval_required",
+      reasonCode: "restricted_file_requires_temporary_elevation",
     });
+    const restrictedApprovalId = (restricted.json() as { approvalId: string }).approvalId;
+    await runtime.approvals.approve(restrictedApprovalId, "user-a");
+    const restrictedApproved = await app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: runtimeHeaders(viewer.token),
+      payload: {
+        requestId: "af4e5d3c-2b1a-4908-8765-43210fedcba9",
+        action: "file.read",
+        resourceId: "team-alpha-restricted",
+        approvalId: restrictedApprovalId,
+      },
+    });
+    expect(restrictedApproved.statusCode).toBe(200);
 
     const wrongTeam = await app.inject({
       method: "POST",

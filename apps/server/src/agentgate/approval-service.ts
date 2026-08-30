@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { AuditService } from "./audit-service.js";
-import { AGENTGATE_POLICY_VERSION, type ApprovalRecord, type AgentGateAction, type CapabilityLease, type HumanId, type TeamId } from "./types.js";
+import {
+  AGENTGATE_POLICY_VERSION,
+  type ApprovalRecord,
+  type AgentGateAction,
+  type CapabilityLease,
+  type HumanId,
+  type ResourceClassification,
+  type TeamId,
+  type TeamRole,
+} from "./types.js";
 import { JsonStore } from "../store.js";
 
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1_000;
@@ -17,6 +26,10 @@ export interface ApprovalRequest {
   teamId?: TeamId | null;
   bundleVersion?: number | null;
   effectiveScope?: string[] | null;
+  humanRole?: TeamRole | null;
+  agentRole?: TeamRole | null;
+  resourceClassification?: ResourceClassification | null;
+  temporaryScope?: string[] | null;
 }
 
 export type CapabilityConsumption =
@@ -56,7 +69,12 @@ function sameRequest(left: ApprovalRequest, right: ApprovalRecord): boolean {
     left.resourceId === right.resourceId &&
     (left.grantId ?? null) === (right.grantId ?? null) &&
     (left.teamId ?? null) === (right.teamId ?? null) &&
-    (left.bundleVersion ?? null) === (right.bundleVersion ?? null)
+    (left.bundleVersion ?? null) === (right.bundleVersion ?? null) &&
+    (left.effectiveScope ?? null)?.join("\u0000") === (right.effectiveScope ?? null)?.join("\u0000") &&
+    (left.humanRole ?? null) === (right.humanRole ?? null) &&
+    (left.agentRole ?? null) === (right.agentRole ?? null) &&
+    (left.resourceClassification ?? null) === (right.resourceClassification ?? null) &&
+    (left.temporaryScope ?? null)?.join("\u0000") === (right.temporaryScope ?? null)?.join("\u0000")
   );
 }
 
@@ -70,8 +88,29 @@ function sameCapability(
     lease.runId === request.runId &&
     lease.requestId === request.requestId &&
     lease.action === request.action &&
-    lease.resourceId === request.resourceId
+    lease.resourceId === request.resourceId &&
+    (lease.grantId ?? null) === (request.grantId ?? null) &&
+    (lease.teamId ?? null) === (request.teamId ?? null) &&
+    (lease.bundleVersion ?? null) === (request.bundleVersion ?? null) &&
+    (lease.effectiveScope ?? null)?.join("\u0000") === (request.effectiveScope ?? null)?.join("\u0000") &&
+    (lease.humanRole ?? null) === (request.humanRole ?? null) &&
+    (lease.agentRole ?? null) === (request.agentRole ?? null) &&
+    (lease.resourceClassification ?? null) === (request.resourceClassification ?? null) &&
+    (lease.temporaryScope ?? null)?.join("\u0000") === (request.temporaryScope ?? null)?.join("\u0000")
   );
+}
+
+function evidence(value: ApprovalRecord | CapabilityLease) {
+  return {
+    grantId: value.grantId ?? null,
+    teamId: value.teamId ?? null,
+    bundleVersion: value.bundleVersion ?? null,
+    effectiveScope: value.effectiveScope ? [...value.effectiveScope] : null,
+    humanRole: value.humanRole ?? null,
+    agentRole: value.agentRole ?? null,
+    resourceClassification: value.resourceClassification ?? null,
+    temporaryScope: value.temporaryScope ? [...value.temporaryScope] : null,
+  };
 }
 
 export class ApprovalService {
@@ -129,6 +168,10 @@ export class ApprovalService {
         ...(request.teamId ? { teamId: request.teamId } : {}),
         ...(request.bundleVersion ? { bundleVersion: request.bundleVersion } : {}),
         ...(request.effectiveScope ? { effectiveScope: [...request.effectiveScope] } : {}),
+        ...(request.humanRole ? { humanRole: request.humanRole } : {}),
+        ...(request.agentRole ? { agentRole: request.agentRole } : {}),
+        ...(request.resourceClassification ? { resourceClassification: request.resourceClassification } : {}),
+        ...(request.temporaryScope ? { temporaryScope: [...request.temporaryScope] } : {}),
       };
       database.approvals.push(next);
       return structuredClone(next);
@@ -216,6 +259,10 @@ export class ApprovalService {
         ...(approval.teamId ? { teamId: approval.teamId } : {}),
         ...(approval.bundleVersion ? { bundleVersion: approval.bundleVersion } : {}),
         ...(approval.effectiveScope ? { effectiveScope: [...approval.effectiveScope] } : {}),
+        ...(approval.humanRole ? { humanRole: approval.humanRole } : {}),
+        ...(approval.agentRole ? { agentRole: approval.agentRole } : {}),
+        ...(approval.resourceClassification ? { resourceClassification: approval.resourceClassification } : {}),
+        ...(approval.temporaryScope ? { temporaryScope: [...approval.temporaryScope] } : {}),
       };
       approval.status = "approved";
       approval.decidedAt = issuedAt;
@@ -247,6 +294,11 @@ export class ApprovalService {
       capabilityId: null,
       status: "success",
       durationMs: null,
+      policyVersion: AGENTGATE_POLICY_VERSION,
+      explanation: "The owner approved this exact scoped protected action.",
+      enforcementPoint: "ApprovalService",
+      protectedActionExecuted: false,
+      ...evidence(outcome.approval),
     });
     await this.audit.record({
       eventType: "capability.issued",
@@ -264,6 +316,10 @@ export class ApprovalService {
       status: "success",
       durationMs: null,
       policyVersion: AGENTGATE_POLICY_VERSION,
+      explanation: "A one-use capability was issued for the exact approved action scope.",
+      enforcementPoint: "ApprovalService",
+      protectedActionExecuted: false,
+      ...evidence(outcome.capability),
     });
     return outcome;
   }
@@ -319,6 +375,11 @@ export class ApprovalService {
       capabilityId: null,
       status: "success",
       durationMs: null,
+      policyVersion: AGENTGATE_POLICY_VERSION,
+      explanation: "The owner denied this protected action before execution.",
+      enforcementPoint: "ApprovalService",
+      protectedActionExecuted: false,
+      ...evidence(approval),
     });
     return approval;
   }
@@ -390,6 +451,11 @@ export class ApprovalService {
         capabilityId: outcome.capability.id,
         status: "success",
         durationMs: null,
+        policyVersion: AGENTGATE_POLICY_VERSION,
+        explanation: "The one-use capability was consumed for its exact bound request.",
+        enforcementPoint: "ApprovalService",
+        protectedActionExecuted: false,
+        ...evidence(outcome.capability),
       });
     }
     return outcome;
@@ -429,6 +495,7 @@ export class ApprovalService {
         explanation: "Owner revoked the Run's authority before the protected action could execute.",
         enforcementPoint: "ApprovalService",
         protectedActionExecuted: false,
+        ...evidence(approval),
       });
     }
     return revoked;
@@ -454,6 +521,11 @@ export class ApprovalService {
       capabilityId: null,
       status: "failure",
       durationMs: null,
+      policyVersion: AGENTGATE_POLICY_VERSION,
+      explanation: "The approval window expired before the protected action executed.",
+      enforcementPoint: "ApprovalService",
+      protectedActionExecuted: false,
+      ...evidence(approval),
     });
   }
 }

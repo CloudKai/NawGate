@@ -90,6 +90,48 @@ describe("ApprovalService", () => {
     expect(audit.list("agent-a").map((event) => event.eventType)).toContain("approval.expired");
   });
 
+  it("binds a JIT capability to the persistent grant bundle and temporary scope", async () => {
+    let current = 1_000;
+    const { approvals } = await makeServices(() => current, 100);
+    const jitRequest: ApprovalRequest = {
+      ...request,
+      action: "file.read",
+      resourceId: "team-alpha-restricted",
+      reasonCode: "restricted_file_requires_temporary_elevation",
+      grantId: "grant-alpha",
+      teamId: "team-alpha",
+      bundleVersion: 4,
+      effectiveScope: ["file.read"],
+      humanRole: "admin",
+      agentRole: "viewer",
+      resourceClassification: "restricted",
+      temporaryScope: ["file.read", "team-alpha-restricted"],
+    };
+    const pending = await approvals.getOrCreate(jitRequest);
+    await approvals.approve(pending.id, "user-a");
+
+    await expect(
+      approvals.consumeCapability({ ...jitRequest, bundleVersion: 5, approvalId: pending.id }),
+    ).resolves.toEqual({ status: "denied", reasonCode: "invalid_capability" });
+    await expect(approvals.consumeCapability({ ...jitRequest, approvalId: pending.id })).resolves.toMatchObject({
+      status: "consumed",
+      capability: {
+        grantId: "grant-alpha",
+        teamId: "team-alpha",
+        bundleVersion: 4,
+        temporaryScope: ["file.read", "team-alpha-restricted"],
+      },
+    });
+
+    const expiring = await approvals.getOrCreate({ ...jitRequest, requestId: "jit-expiry" });
+    await approvals.approve(expiring.id, "user-a");
+    current = 1_100;
+    await expect(approvals.consumeCapability({ ...jitRequest, requestId: "jit-expiry", approvalId: expiring.id })).resolves.toEqual({
+      status: "denied",
+      reasonCode: "approval_expired",
+    });
+  });
+
   it("serializes concurrent approval decisions", async () => {
     const { approvals } = await makeServices();
     const pending = await approvals.getOrCreate(request);

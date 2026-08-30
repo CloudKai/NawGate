@@ -158,6 +158,30 @@ function migrateAuditEvents(value: unknown[]): Database["auditEvents"] {
         record.effectiveScope.every((item) => typeof item === "string")
           ? [...record.effectiveScope]
           : null,
+      rejectedFieldNames:
+        Array.isArray(record.rejectedFieldNames) &&
+        record.rejectedFieldNames.every((item) => typeof item === "string")
+          ? [...record.rejectedFieldNames]
+          : null,
+      humanRole:
+        record.humanRole === "viewer" || record.humanRole === "editor" || record.humanRole === "admin"
+          ? record.humanRole
+          : null,
+      agentRole:
+        record.agentRole === "viewer" || record.agentRole === "editor" || record.agentRole === "admin"
+          ? record.agentRole
+          : null,
+      resourceClassification:
+        record.resourceClassification === "internal" ||
+        record.resourceClassification === "sensitive" ||
+        record.resourceClassification === "restricted"
+          ? record.resourceClassification
+          : null,
+      temporaryScope:
+        Array.isArray(record.temporaryScope) &&
+        record.temporaryScope.every((item) => typeof item === "string")
+          ? [...record.temporaryScope]
+          : null,
     };
   });
 }
@@ -279,7 +303,10 @@ export function migrateDatabase(value: unknown): Database {
     throw new Error("Unsupported database format");
   }
 
-  return seedDatabase(value as unknown as Database);
+  return seedDatabase({
+    ...(value as unknown as Database),
+    auditEvents: migrateAuditEvents(value.auditEvents),
+  });
 }
 
 export class JsonStore {

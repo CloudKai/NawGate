@@ -19,6 +19,7 @@ import type {
   PolicyDecision,
   ProtectedActionResult,
   ProtectedResource,
+  TeamMembership,
   TrustedRuntimeContext,
   TeamId,
 } from "./types.js";
@@ -35,6 +36,18 @@ interface ProtectedResourceBoundary {
 
 export interface RuntimeAuthorityResolver {
   isAuthorityActive(context: TrustedRuntimeContext): boolean;
+}
+
+export interface DemoExecutionBarrier {
+  reached: Promise<void>;
+  release(): void;
+  dispose(): void;
+}
+
+interface PendingDemoBarrier {
+  reached(): void;
+  released: Promise<void>;
+  release(): void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -143,6 +156,9 @@ function explanationFor(
   if (reasonCode === "agent_grant_role_insufficient") {
     return "This Agent's team grant role is below the protected file's minimum role.";
   }
+  if (reasonCode === "restricted_file_requires_temporary_elevation") {
+    return "The human team role is sufficient, but this Agent's persistent grant is viewer-only; explicit owner approval is required for a one-use restricted-file elevation.";
+  }
   if (reasonCode === "runtime_authority_revoked") {
     return "The Run authority is no longer active; the protected action was not executed.";
   }
@@ -160,6 +176,7 @@ function explanationFor(
 
 export class RuntimeGateway {
   private executionTail: Promise<void> = Promise.resolve();
+  private readonly demoBarriers = new Map<string, PendingDemoBarrier>();
 
   constructor(
     private readonly policy: PolicyEngine,
@@ -171,6 +188,35 @@ export class RuntimeGateway {
     private readonly grants: AgentGrantResolver = new AgentTeamGrantService(store),
     private readonly authority?: RuntimeAuthorityResolver,
   ) {}
+
+  /**
+   * A server-only synchronization hook used by the explicitly enabled local
+   * Security Lab. It sits after the initial decision and before the final
+   * mutable-authority recheck; no runtime request can create it.
+   */
+  createDemoExecutionBarrier(runId: string, requestId: string): DemoExecutionBarrier {
+    const key = this.demoBarrierKey(runId, requestId);
+    if (this.demoBarriers.has(key)) {
+      throw new Error("A demo execution barrier is already registered for this request");
+    }
+    let signalReached!: () => void;
+    let signalRelease!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      signalReached = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      signalRelease = resolve;
+    });
+    this.demoBarriers.set(key, { reached: signalReached, released, release: signalRelease });
+    return {
+      reached,
+      release: () => signalRelease(),
+      dispose: () => {
+        this.demoBarriers.delete(key);
+        signalRelease();
+      },
+    };
+  }
 
   async execute(
     context: TrustedRuntimeContext,
@@ -269,7 +315,15 @@ export class RuntimeGateway {
       action: { name: request.action },
       environment: { name: environmentFor(request.action) },
     });
-    await this.recordPolicyDecision(context, request, resource, decision, startedAt, grants);
+    await this.recordPolicyDecision(
+      context,
+      request,
+      resource,
+      decision,
+      startedAt,
+      grants,
+      memberships,
+    );
 
     if (decision.outcome === "deny") {
       return {
@@ -299,6 +353,8 @@ export class RuntimeGateway {
         return this.replayExecution(existing);
       }
 
+      await this.awaitDemoExecutionBarrier(context, request);
+
       // The initial decision may have waited behind another protected action.
       // Re-resolve every mutable authorization input immediately before any
       // approval consumption or protected side effect.
@@ -313,6 +369,7 @@ export class RuntimeGateway {
           { outcome: "deny", risk: "high", reasonCode: "runtime_authority_revoked" },
           startedAt,
           finalGrants,
+          finalMemberships,
         );
         return {
           status: "denied",
@@ -330,6 +387,7 @@ export class RuntimeGateway {
           { outcome: "deny", risk: "high", reasonCode: "unknown_resource" },
           startedAt,
           finalGrants,
+          finalMemberships,
         );
         return {
           status: "denied",
@@ -360,6 +418,7 @@ export class RuntimeGateway {
           finalDecision,
           startedAt,
           finalGrants,
+          finalMemberships,
         );
         return {
           status: "denied",
@@ -380,7 +439,12 @@ export class RuntimeGateway {
           action: request.action,
           resourceId: request.resourceId,
           reasonCode: currentDecision.reasonCode,
-          ...this.grantEvidence(finalResource, finalGrants),
+          ...this.grantEvidence(
+            finalResource,
+            finalGrants,
+            finalMemberships,
+            currentDecision.reasonCode === "restricted_file_requires_temporary_elevation",
+          ),
         };
         if (!request.approvalId) {
           try {
@@ -461,7 +525,7 @@ export class RuntimeGateway {
             explanation: explanationFor(context, request, finalResource, consumption.reasonCode),
             enforcementPoint: "RuntimeGateway",
             protectedActionExecuted: false,
-            ...this.grantEvidence(finalResource, finalGrants),
+            ...this.grantEvidence(finalResource, finalGrants, finalMemberships),
           });
           return {
             status: "denied",
@@ -498,6 +562,7 @@ export class RuntimeGateway {
         grants,
         { outcome: "deny", risk: "high", reasonCode: "runtime_authority_revoked" },
         startedAt,
+        memberships,
       );
     }
     if (!resource) {
@@ -508,6 +573,7 @@ export class RuntimeGateway {
         grants,
         { outcome: "deny", risk: "high", reasonCode: "unknown_resource" },
         startedAt,
+        memberships,
       );
     }
     const finalDecision = await this.policy.evaluate({
@@ -531,6 +597,7 @@ export class RuntimeGateway {
         grants,
         finalDecision,
         startedAt,
+        memberships,
       );
     }
     try {
@@ -557,7 +624,7 @@ export class RuntimeGateway {
         explanation: "The RuntimeGateway authorized and completed the protected action.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: true,
-        ...this.grantEvidence(resource, grants),
+        ...this.grantEvidence(resource, grants, memberships, Boolean(request.approvalId)),
       });
       return {
         status: "success",
@@ -597,7 +664,7 @@ export class RuntimeGateway {
         explanation: "Authorization passed, but the protected action failed during execution.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: false,
-        ...this.grantEvidence(resource, grants),
+        ...this.grantEvidence(resource, grants, memberships, Boolean(request.approvalId)),
       });
       return {
         status: "failed",
@@ -609,6 +676,22 @@ export class RuntimeGateway {
     }
   }
 
+  private async awaitDemoExecutionBarrier(
+    context: TrustedRuntimeContext,
+    request: GatewayRequest,
+  ): Promise<void> {
+    const key = this.demoBarrierKey(context.runId, request.requestId);
+    const barrier = this.demoBarriers.get(key);
+    if (!barrier) return;
+    barrier.reached();
+    await barrier.released;
+    this.demoBarriers.delete(key);
+  }
+
+  private demoBarrierKey(runId: string, requestId: string): string {
+    return `${runId}\u0000${requestId}`;
+  }
+
   private async deniedAfterFinalRecheck(
     context: TrustedRuntimeContext,
     request: GatewayRequest,
@@ -616,8 +699,17 @@ export class RuntimeGateway {
     grants: readonly AgentTeamGrant[],
     decision: Extract<PolicyDecision, { outcome: "deny" }>,
     startedAt: number,
+    memberships: readonly TeamMembership[] = [],
   ): Promise<GatewayResult> {
-    await this.recordPolicyDecision(context, request, resource, decision, startedAt, grants);
+    await this.recordPolicyDecision(
+      context,
+      request,
+      resource,
+      decision,
+      startedAt,
+      grants,
+      memberships,
+    );
     return {
       status: "denied",
       requestId: request.requestId,
@@ -669,6 +761,7 @@ export class RuntimeGateway {
     decision: PolicyDecision,
     startedAt: number,
     grants: readonly AgentTeamGrant[] = [],
+    memberships: readonly TeamMembership[] = [],
   ): Promise<void> {
     await this.audit.record({
       eventType:
@@ -699,21 +792,41 @@ export class RuntimeGateway {
       explanation: explanationFor(context, request, resource, decision.reasonCode),
       enforcementPoint: "RuntimeGateway",
       protectedActionExecuted: false,
-      ...this.grantEvidence(resource, grants),
+      ...this.grantEvidence(
+        resource,
+        grants,
+        memberships,
+        decision.reasonCode === "restricted_file_requires_temporary_elevation",
+      ),
     });
   }
 
   private grantEvidence(
     resource: ProtectedResource | null,
     grants: readonly AgentTeamGrant[],
+    memberships: readonly TeamMembership[] = [],
+    temporaryElevation = false,
   ): {
     grantId: string | null;
     teamId: TeamId | null;
     bundleVersion: number | null;
     effectiveScope: string[] | null;
+    humanRole: TeamMembership["role"] | null;
+    agentRole: AgentTeamGrant["role"] | null;
+    resourceClassification: ProtectedResource["classification"] | null;
+    temporaryScope: string[] | null;
   } {
     if (!resource || resource.type !== "team_file" || !isTeamId(resource.teamId)) {
-      return { grantId: null, teamId: null, bundleVersion: null, effectiveScope: null };
+      return {
+        grantId: null,
+        teamId: null,
+        bundleVersion: null,
+        effectiveScope: null,
+        humanRole: null,
+        agentRole: null,
+        resourceClassification: null,
+        temporaryScope: null,
+      };
     }
     const grant = grants
       .filter((candidate) => candidate.teamId === resource.teamId)
@@ -723,6 +836,10 @@ export class RuntimeGateway {
       teamId: resource.teamId,
       bundleVersion: grant?.bundleVersion ?? null,
       effectiveScope: grant ? [...grant.allowedActions] : null,
+      humanRole: memberships.find((membership) => membership.teamId === resource.teamId)?.role ?? null,
+      agentRole: grant?.role ?? null,
+      resourceClassification: resource.classification,
+      temporaryScope: temporaryElevation ? ["file.read", resource.id] : null,
     };
   }
 

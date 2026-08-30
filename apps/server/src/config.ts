@@ -17,6 +17,12 @@ const envSchema = z.object({
   CODEX_MAX_OUTPUT_BYTES: z.coerce.number().int().min(65_536).default(2_097_152),
   AGENTGATE_GATEWAY_URL: z.string().url().optional(),
   AGENTGATE_APPROVAL_WAIT_MS: z.coerce.number().int().min(1_000).default(90_000),
+  // `z.coerce.boolean()` treats every non-empty string (including "false") as true.
+  // This demo-only endpoint must remain disabled unless explicitly enabled.
+  AGENTGATE_SECURITY_LAB_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   RUNTIME_PROVIDER: z.enum(["local-process", "container"]).default("local-process"),
   CONTAINER_ENGINE: z.string().min(1).default("docker"),
   CONTAINER_RUNTIME_IMAGE: z.string().min(1).default("volc-agent-runtime:local"),
@@ -90,6 +96,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     agentGateGatewayUrl:
       env.AGENTGATE_GATEWAY_URL?.trim() || "http://127.0.0.1:" + env.PORT,
     agentGateApprovalWaitMs: env.AGENTGATE_APPROVAL_WAIT_MS,
+    securityLabEnabled: env.AGENTGATE_SECURITY_LAB_ENABLED,
     runtimeProvider: env.RUNTIME_PROVIDER,
     containerEngine: env.CONTAINER_ENGINE,
     containerRuntimeImage: env.CONTAINER_RUNTIME_IMAGE,

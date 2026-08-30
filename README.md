@@ -31,6 +31,8 @@ Volcengine ECS.
 - AgentGate identity, ownership, approval, one-use capability, and redacted audit evidence
 - Persistent Team Agent grants intersected with human membership, Run identity,
   resource role thresholds, and final pre-execution rechecks
+- One-use JIT elevation for restricted team-file reads, with a judge-facing
+  Security Lab in the side panel
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -44,8 +46,9 @@ deploy requires owner approval, produces a one-use capability, and leaves a
 redacted audit trail. Owner revocation invalidates the active Run identity and
 its capabilities. A standards-informed extension lets a team admin persistently
 enroll an owned Agent with a narrow file-read role. Human membership, Agent
-grant, Run identity, and resource threshold must all agree; the Runtime cannot
-assert any of them. See the
+grant, Run identity, and resource threshold must all agree; a viewer grant can
+request restricted access only through explicit one-use owner approval. The
+Runtime cannot assert any of them. See the
 [AgentGate overview](docs/agentgate/overview.md),
 [standards alignment](docs/agentgate/standards.md), and
 [three-minute demo](docs/agentgate/demo.md).
@@ -146,7 +149,9 @@ The Web UI also exposes a **Delegation receipt** for the latest approval and a
 **Revoke access** control while a Run is active. For User A's Team Alpha admin
 fixture, it also exposes persistent Agent enrollment and revocation. These
 controls show safe metadata and status only; they do not expose credentials or
-protected payloads.
+protected payloads. When `AGENTGATE_SECURITY_LAB_ENABLED=true`, the side panel
+also exposes real-gateway checks for allow, deny, JIT, replay, forgery, and
+revocation scenarios.
 
 ### 5. Stop and resume
 
@@ -266,6 +271,7 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `CODEX_TIMEOUT_MS` | `600000` | Maximum duration of one turn. |
 | `AGENTGATE_GATEWAY_URL` | `http://127.0.0.1:<PORT>` | Runtime gateway URL injected into each Run. |
 | `AGENTGATE_APPROVAL_WAIT_MS` | `90000` | Maximum time `agentctl` waits for owner approval. |
+| `AGENTGATE_SECURITY_LAB_ENABLED` | `false` | Enables the redacted local/demo Security Lab. |
 | `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.

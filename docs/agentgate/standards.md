@@ -60,11 +60,21 @@ hard cross-user deny.
 - missing membership: deny;
 - membership below the file's minimum role: deny;
 - missing, revoked, expired, or under-scoped Agent grant: deny;
-- Agent grant below the file's minimum role: deny;
+- Agent grant below the minimum role for a restricted file: require explicit
+  owner approval for a one-use exact-bound temporary elevation;
+- Agent grant below the minimum role for a non-JIT resource: deny;
 - revoked or expired Run authority: deny;
 - action and resource-type mismatch: deny;
 - denied policy decision: no protected side effect;
 - protected file payload: never included in audit storage.
+
+The JIT capability is bound to the human, Agent, Run, request ID, team, file,
+`file.read`, persistent grant ID, grant bundle version, effective scope,
+resource classification, and temporary resource scope. The gateway resolves
+all mutable authority again immediately before consuming it and immediately
+before the protected side effect. Approval cannot repair a missing membership,
+revoked/expired grant, invalid Run, unknown team/resource/action, or malformed
+request.
 
 ## Production work still required
 

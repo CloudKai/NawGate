@@ -10,6 +10,7 @@ import { RuntimeGateway } from "./runtime-gateway.js";
 import { JsonStore } from "../store.js";
 import { AGENTGATE_POLICY_VERSION } from "./types.js";
 import type { AgentTeamGrant } from "./types.js";
+import { RuntimeCredentialService } from "./runtime-credential-service.js";
 
 const temporaryDirectories: string[] = [];
 const context = { humanId: "user-a" as const, agentId: "agent-a", runId: "run-a" };
@@ -229,8 +230,8 @@ describe("RuntimeGateway", () => {
     expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
   });
 
-  it("denies revoked, expired, under-scoped, and under-role grants without file execution", async () => {
-    const { gateway, resources, store } = await makeGateway();
+  it("denies revoked and under-scoped grants, while elevating a viewer grant only once", async () => {
+    const { gateway, resources, store, approvals } = await makeGateway();
     const updateGrant = async (
       update: (grant: AgentTeamGrant) => void,
     ) => store.mutate((database) => {
@@ -280,17 +281,69 @@ describe("RuntimeGateway", () => {
     await updateGrant((grant) => {
       grant.role = "viewer";
     });
+    const pending = await gateway.execute(context, {
+      requestId: "request-under-role-grant",
+      action: "file.read",
+      resourceId: "team-alpha-restricted",
+    });
+    expect(pending).toMatchObject({
+      status: "approval_required",
+      reasonCode: "restricted_file_requires_temporary_elevation",
+    });
+    if (pending.status !== "approval_required") throw new Error("Expected JIT approval");
+    await approvals.approve(pending.approvalId, "user-a");
     await expect(gateway.execute(context, {
       requestId: "request-under-role-grant",
       action: "file.read",
       resourceId: "team-alpha-restricted",
-    })).resolves.toMatchObject({
-      status: "denied",
-      reasonCode: "agent_grant_role_insufficient",
-    });
+      approvalId: pending.approvalId,
+    })).resolves.toMatchObject({ status: "success" });
 
     expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
-    expect(resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(0);
+    expect(resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(1);
+    expect(store.snapshot().agentTeamGrants.find((grant) => grant.id === "grant-agent-a-alpha")).toMatchObject({
+      role: "viewer",
+      status: "active",
+      allowedActions: ["file.read"],
+      bundleVersion: 1,
+    });
+    await expect(approvals.get(pending.approvalId)).resolves.toMatchObject({ status: "consumed" });
+  });
+
+  it("denies a queued initially-allowed action after Run authority revocation", async () => {
+    const { resources, approvals, audit, store } = await makeGateway();
+    const credentials = new RuntimeCredentialService();
+    const guarded = new RuntimeGateway(
+      new DeterministicPolicyEngine(),
+      resources,
+      audit,
+      approvals,
+      store,
+      undefined,
+      undefined,
+      credentials,
+    );
+    const guardedContext = { humanId: "user-a" as const, agentId: "agent-a", runId: "run-demo-queue" };
+    credentials.issue(guardedContext.agentId, guardedContext.runId, guardedContext.humanId);
+    const requestId = "request-demo-queue";
+    const barrier = guarded.createDemoExecutionBarrier(guardedContext.runId, requestId);
+    const execution = guarded.execute(guardedContext, {
+      requestId,
+      action: "resource.read",
+      resourceId: "project-a",
+    });
+    await barrier.reached;
+    credentials.revokeAuthority(guardedContext.runId);
+    barrier.release();
+    await expect(execution).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "runtime_authority_revoked",
+    });
+    expect(resources.getExecutionCount("resource.read", "project-a")).toBe(0);
+    expect(audit.list("agent-a")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ requestId, eventType: "policy.allow" }),
+      expect.objectContaining({ requestId, eventType: "policy.deny", reasonCode: "runtime_authority_revoked" }),
+    ]));
   });
 
   it("rechecks a persistent Agent grant after queueing and before the protected file read", async () => {

@@ -3,6 +3,7 @@ import type { Agent, AgentTeamGrant, ApprovalRecord, AuditEvent } from "../../ty
 import { ApprovalCard } from "./ApprovalCard";
 import { AuditTimeline } from "./AuditTimeline";
 import { DelegationReceipt } from "./DelegationReceipt";
+import { SecurityLab } from "./SecurityLab";
 
 interface AgentGatePanelProps {
   agent: Agent;
@@ -18,6 +19,7 @@ interface AgentGatePanelProps {
   grantBusyId: string | null;
   onEnrollGrant: (role: "viewer" | "editor" | "admin") => void;
   onRevokeGrant: (grantId: string) => void;
+  onLabStateChanged: () => void;
 }
 
 export function AgentGatePanel({
@@ -34,6 +36,7 @@ export function AgentGatePanel({
   grantBusyId,
   onEnrollGrant,
   onRevokeGrant,
+  onLabStateChanged,
 }: AgentGatePanelProps) {
   const [grantRole, setGrantRole] = useState<"viewer" | "editor" | "admin">("viewer");
   const alphaGrant = grants.find(
@@ -145,6 +148,7 @@ export function AgentGatePanel({
           <AuditTimeline events={audit} />
         </div>
       </div>
+      <SecurityLab agentId={agent.id} onStateChanged={onLabStateChanged} />
       <DelegationReceipt agent={agent} approvals={approvalHistory} audit={audit} />
     </section>
   );

@@ -165,6 +165,7 @@ export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-3000}"
 export CODEX_SANDBOX_MODE="$codex_sandbox_mode"
 export RUNTIME_PROVIDER=container
+export AGENTGATE_SECURITY_LAB_ENABLED="${AGENTGATE_SECURITY_LAB_ENABLED:-true}"
 export CONTAINER_ENGINE="$engine"
 export CONTAINER_RUNTIME_IMAGE="$runtime_image"
 if [[ -z "${AGENTGATE_GATEWAY_URL:-}" ]]; then

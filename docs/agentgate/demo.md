@@ -23,6 +23,16 @@ Open `http://localhost:3000` and use the side panel:
    `CAPABILITY CONSUMED`, and one successful protected action.
 7. Use **Revoke access** during an active Run when demonstrating the kill path;
    subsequent gateway requests receive an invalid runtime credential response.
+8. In the **Security Lab**, run **Own project**, **Cross-user deny**, and
+   **Forged admin**. Each result should show the real decision, `bouncer-v4`,
+   `RuntimeGateway`, and whether a protected side effect executed.
+9. For the complete JIT proof, select **Alpha restricted JIT**, approve the
+   resulting card, then select **Complete approved JIT** in the Lab result.
+   The exact read succeeds once, the persistent grant remains viewer, and the
+   synthetic Run is closed without exposing its credential.
+10. Select **Queued after revoke**. It shows an actual initial allow paused
+    before the side effect, owner-style authority revocation, and the final
+    RuntimeGateway recheck deny with zero execution.
 
 The receipt is evidence only: it contains metadata and status, never secrets.
 
@@ -33,12 +43,15 @@ production team permissions, select a User A Agent and use the **Persistent
 Team Agent enrollment** card:
 
 1. Enroll the Agent in Team Alpha as `viewer`.
-2. Run the internal and restricted reads below. The internal read succeeds,
-   while the restricted read fails because the Agent grant is under-role even
-   though User A is a team admin.
-3. Revoke the enrollment and retry the internal read. It fails closed with
+2. Run the internal and restricted reads below. The internal read succeeds;
+   the restricted read creates a JIT approval because the viewer grant is
+   under-role even though User A is a team admin.
+3. Approve the restricted request once in the side panel. The exact
+   human/Agent/Run/team/file/grant bundle is consumed once, the file read
+   succeeds, and the persistent Agent grant remains viewer.
+4. Revoke the enrollment and retry the internal read. It fails closed with
    `agent_grant_revoked` and no protected read executes.
-4. Re-enroll as `editor`. The new bundle version can read both Alpha files and
+5. Re-enroll as `editor`. The new bundle version can read both Alpha files and
    the audit timeline identifies the exact grant and effective scope.
 
 ```bash
@@ -56,6 +69,12 @@ agentctl file read team-beta-internal
 
 The audit timeline should retain the registered file identifier and policy
 reason while never containing the synthetic file payload.
+
+The **Replay capability** Security Lab scenario runs the first approved JIT
+read, then attempts a fresh-request replay with the consumed capability. It
+should show `DENY`, `capability_consumed`, and no second side effect. The
+**Revoke grant** and **Revoke Run** scenarios intentionally mutate demo
+authority so their follow-up requests fail closed.
 
 ## Manual real-Codex rehearsal
 

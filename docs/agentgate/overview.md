@@ -19,20 +19,31 @@ that can execute a protected side effect.
 - Replays with a new request ID, expired approvals, invalid capabilities, and
   revoked Run authority fail closed without executing the protected action.
 - Every decision is redacted audit evidence. Policy decisions carry the
-  central version `bouncer-v3`, a reason explanation, and `RuntimeGateway` as
+  central version `bouncer-v4`, a reason explanation, and `RuntimeGateway` as
   the enforcement point.
 - Protected team files require the intersection of the current human team
   relationship, a persistent administrator-approved Agent grant, the Run
-  identity, and the resource role threshold. The Agent grant survives across
+  identity, and the resource role threshold. A viewer grant may request a
+  restricted-file read only through a one-use, exact-bound owner-approved JIT
+  capability; the persistent grant remains viewer. The grant survives across
   Runs, but never replaces the short-lived per-Run identity.
 - Team-grant revocation invalidates active Run authority and pending or
   approved capabilities. The gateway re-resolves mutable authority immediately
   before a protected side effect, so a queued stale allow cannot execute.
 
 The Delegation Receipt in the Web UI is a safe summary of the human, Agent,
-Run, action, resource, risk, reason, policy version, timestamps, expiry, uses,
-and status. It never displays a runtime credential, API key, or protected
-resource payload.
+team membership role, persistent grant role/bundle, Run, temporary JIT scope,
+action, resource, risk, reason, policy version, enforcement point, timestamps,
+expiry, uses, and status. It never displays a runtime credential, API key, or
+protected resource payload.
+
+When enabled for the local POC, the Security Lab in the side panel runs
+redacted scenarios through the real RuntimeGateway: own/cross-user resources,
+team files, a complete JIT approval/retry/cleanup lifecycle, capability replay,
+forged attributes, Run revocation, grant revocation, and a deterministic queued
+initial-allow → revoke → final-recheck denial. Opaque scenario references keep
+the Runtime credential server-side. It is disabled by default outside the local
+demo configuration.
 
 ## Scope
 

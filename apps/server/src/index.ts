@@ -8,6 +8,7 @@ import { ProtectedResourceService } from "./agentgate/protected-resource-service
 import { IdentityService } from "./agentgate/identity-service.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
+import { SecurityLabService } from "./agentgate/security-lab-service.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
 import { createRunner } from "./runner-factory.js";
@@ -34,6 +35,7 @@ const gateway = new RuntimeGateway(
   grants,
   credentials,
 );
+const securityLab = new SecurityLabService(gateway, approvals, audit, credentials, grants);
 const runner = createRunner(config, store, { credentials, audit });
 const identity = new IdentityService();
 const service = new AgentService(config, store, workspaces, runner);
@@ -45,6 +47,7 @@ const app = await createApp(config, service, identity, {
   approvals,
   audit,
   grants,
+  securityLab,
 });
 
 const shutdown = async (signal: string) => {

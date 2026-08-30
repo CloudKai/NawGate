@@ -110,6 +110,27 @@ explanation, enforcement point, and whether a protected side effect executed.
 The Web UI may display a safe Delegation Receipt, but never a secret or
 protected payload.
 
+### JIT elevation and Security Lab
+
+`bouncer-v4` allows an exact, one-use JIT capability only after the persistent
+Agent grant and all hard prerequisites have passed. JIT MUST NOT mutate an
+`AgentTeamGrant` role, action scope, status, or bundle version. Temporary
+authority is exact-resource scoped, exact-action scoped, Run-bound, expiring,
+revocable, and one-use.
+
+Approval MUST NOT repair cross-team access, missing membership, missing or
+revoked/expired grant, forged trusted attributes, unknown resource, or any
+other hard deny. The final pre-side-effect recheck is mandatory even after a
+capability is consumed.
+
+Security Lab scenarios use the real backend enforcement path and may be
+enabled only through explicit local/demo configuration. They never expose a
+raw Runtime credential. Every terminal demo path must revoke its synthetic Run
+authority and pending/approved capabilities. Any demo synchronization hook is
+server-only and exists solely to prove the real final recheck. Safe audit for a
+malformed Runtime body may use only the already-resolved trusted context and
+bounded field names; never audit attacker-controlled values.
+
 ### Preserve the starter
 
 Do not break:

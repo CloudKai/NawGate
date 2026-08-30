@@ -42,9 +42,18 @@ export function DelegationReceipt({ agent, approvals, audit }: DelegationReceipt
         <div><dt>Run</dt><dd>{shortId(approval.runId)}</dd></div>
         <div><dt>Action</dt><dd>{approval.action}</dd></div>
         <div><dt>Resource</dt><dd>{approval.resourceId}</dd></div>
+        <div><dt>Resource class</dt><dd>{approval.resourceClassification ?? "—"}</dd></div>
+        <div><dt>Team membership</dt><dd>{approval.humanRole ?? "—"}</dd></div>
+        <div><dt>Persistent grant</dt><dd>{approval.agentRole ?? "—"}</dd></div>
+        <div><dt>Grant ID</dt><dd>{approval.grantId ? shortId(approval.grantId) : "—"}</dd></div>
+        <div><dt>Team / bundle</dt><dd>{approval.teamId ? `${approval.teamId} · v${approval.bundleVersion ?? "—"}` : "—"}</dd></div>
+        <div><dt>Allowed scope</dt><dd>{approval.effectiveScope?.join(", ") ?? "—"}</dd></div>
+        <div><dt>Temporary JIT</dt><dd>{approval.temporaryScope?.join(" · ") ?? "None"}</dd></div>
         <div><dt>Risk</dt><dd>{approval.risk}</dd></div>
         <div><dt>Reason</dt><dd>{pretty(approval.reasonCode)}</dd></div>
-        <div><dt>Policy</dt><dd>{policyEvent?.policyVersion ?? "bouncer-v3"}</dd></div>
+        <div><dt>Policy</dt><dd>{policyEvent?.policyVersion ?? "bouncer-v4"}</dd></div>
+        <div><dt>Enforcement</dt><dd>{policyEvent?.enforcementPoint ?? "RuntimeGateway"}</dd></div>
+        <div><dt>Side effect</dt><dd>{policyEvent?.protectedActionExecuted ? "Executed" : "Not executed"}</dd></div>
         <div><dt>Created</dt><dd>{new Date(approval.createdAt).toLocaleString()}</dd></div>
         <div><dt>Decided</dt><dd>{approval.decidedAt ? new Date(approval.decidedAt).toLocaleString() : "Pending"}</dd></div>
         <div><dt>Expires</dt><dd>{new Date(approval.expiresAt).toLocaleString()}</dd></div>

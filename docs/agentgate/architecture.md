@@ -56,6 +56,47 @@ Agent workspace or audit event.
 8. The gateway serializes protected side effects and re-resolves authority,
    memberships, grants, and resource metadata immediately before execution.
 
+## Bouncer v4: temporary JIT elevation
+
+`bouncer-v4` keeps persistent Agent enrollment separate from exceptional
+authority. Effective team-file authority is the intersection of:
+
+```text
+human Team membership
+AND persistent Agent Team grant
+AND temporary Run identity
+AND exact one-use JIT capability (when required)
+AND protected-resource requirements
+```
+
+A missing human membership, wrong team, missing/revoked/expired/under-scoped
+grant, malformed trusted attribute, or unknown resource is a **hard DENY**.
+Approval never repairs those conditions. A Team Alpha human with a valid
+viewer `file.read` grant may instead receive **REQUIRE_APPROVAL** only for an
+eligible restricted Team Alpha file. The approval is bound to the human,
+Agent, Run, request ID, file, action, grant ID, bundle version, and effective
+scope. It grants a single temporary read; it never mutates `AgentTeamGrant`.
+
+The gateway re-resolves the Run authority, human membership, persistent grant,
+resource metadata, policy, and exact capability immediately before the
+protected side effect. Revocation or changed authority at that point denies
+the queued action without executing it.
+
+## Security Lab
+
+The local-only Security Lab calls the real `RuntimeGateway`; the Web UI never
+calculates a policy decision. Its JIT scenario keeps the trusted context and
+runtime credential server-side under an opaque scenario reference. After the
+owner approves, the server retries the exact request on the same Run, consumes
+the capability, and closes the demo Run. Terminal success, denial,
+cancellation, error, and timeout revoke demo authority and pending/approved
+capabilities.
+
+For the queued-revocation scenario, a server-only local-demo barrier pauses an
+initially allowed request before its final recheck. The lab revokes authority,
+releases the barrier, and returns the actual final deny result. No browser or
+Runtime request can create this barrier, and it is not an authorization bypass.
+
 The revocation endpoint is `POST /api/agents/:id/revoke-access` and is exposed
 only to the current human owner. It revokes authority; it does not claim to
 terminate every internal Codex operation already running in the container.

@@ -177,7 +177,7 @@ describe("DeterministicPolicyEngine", () => {
     });
   });
 
-  it("intersects the human role with the persistent Agent grant role", async () => {
+  it("requires one-use elevation when a viewer grant reads a restricted file", async () => {
     await expect(
       policy.evaluate(input(
         "user-a",
@@ -188,8 +188,8 @@ describe("DeterministicPolicyEngine", () => {
         [{ ...alphaGrant, role: "viewer" }],
       )),
     ).resolves.toMatchObject({
-      outcome: "deny",
-      reasonCode: "agent_grant_role_insufficient",
+      outcome: "require_approval",
+      reasonCode: "restricted_file_requires_temporary_elevation",
     });
   });
 

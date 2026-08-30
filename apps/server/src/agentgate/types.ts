@@ -31,7 +31,7 @@ export interface AgentTeamGrant {
 
 // Keep the policy contract visible in every meaningful decision trail. A
 // version bump is required when the authorization semantics change.
-export const AGENTGATE_POLICY_VERSION = "bouncer-v3";
+export const AGENTGATE_POLICY_VERSION = "bouncer-v4";
 
 export interface HumanPrincipal {
   id: HumanId;
@@ -121,6 +121,7 @@ export type PolicyDenyReasonCode =
   | "agent_grant_expired"
   | "agent_grant_action_under_scoped"
   | "agent_grant_role_insufficient"
+  | "restricted_file_requires_temporary_elevation"
   | "runtime_authority_revoked"
   | "action_resource_mismatch";
 
@@ -138,7 +139,9 @@ export type PolicyDecision =
   | {
       outcome: "require_approval";
       risk: "high";
-      reasonCode: "production_deploy_requires_owner_approval";
+      reasonCode:
+        | "production_deploy_requires_owner_approval"
+        | "restricted_file_requires_temporary_elevation";
     };
 
 export interface PolicyEngine {
@@ -193,7 +196,9 @@ export type GatewayResult =
       resourceId: string;
       approvalId: string;
       risk: "high";
-      reasonCode: "production_deploy_requires_owner_approval";
+      reasonCode:
+        | "production_deploy_requires_owner_approval"
+        | "restricted_file_requires_temporary_elevation";
     }
   | {
       status: "failed";
@@ -236,6 +241,10 @@ export interface ApprovalRecord {
   teamId?: TeamId;
   bundleVersion?: number;
   effectiveScope?: string[];
+  humanRole?: TeamRole;
+  agentRole?: TeamRole;
+  resourceClassification?: ResourceClassification;
+  temporaryScope?: string[];
 }
 
 export interface CapabilityLease {
@@ -254,6 +263,10 @@ export interface CapabilityLease {
   teamId?: TeamId;
   bundleVersion?: number;
   effectiveScope?: string[];
+  humanRole?: TeamRole;
+  agentRole?: TeamRole;
+  resourceClassification?: ResourceClassification;
+  temporaryScope?: string[];
 }
 
 export type AuditEventType =
@@ -270,6 +283,10 @@ export type AuditEventType =
   | "approval.revoked"
   | "runtime_identity.issued"
   | "runtime_identity.revoked"
+  | "runtime.request_rejected"
+  | "lab_run.started"
+  | "lab_run.completed"
+  | "lab_run.cancelled"
   | "capability.issued"
   | "capability.consumed"
   | "protected_action.succeeded"
@@ -306,6 +323,11 @@ export interface AuditEvent {
   teamId: TeamId | null;
   bundleVersion: number | null;
   effectiveScope: string[] | null;
+  humanRole: TeamRole | null;
+  agentRole: TeamRole | null;
+  resourceClassification: ResourceClassification | null;
+  temporaryScope: string[] | null;
+  rejectedFieldNames: string[] | null;
 }
 
 export interface ActionExecutionRecord {

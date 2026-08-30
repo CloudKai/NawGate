@@ -180,11 +180,8 @@ function teamFileDecision(input: PolicyInput, now: number): PolicyDecision {
       reasonCode: "team_membership_missing",
     };
   }
-  const requiredRole =
-    resource.classification === "restricted" && roleRank(resource.minimumRole) < roleRank("editor")
-      ? "editor"
-      : resource.minimumRole;
-  if (roleRank(membership.role) < roleRank(requiredRole)) {
+  const minimumHumanRole = resource.minimumRole;
+  if (roleRank(membership.role) < roleRank(minimumHumanRole)) {
     return {
       outcome: "deny",
       risk: "high",
@@ -226,7 +223,18 @@ function teamFileDecision(input: PolicyInput, now: number): PolicyDecision {
       reasonCode: "agent_grant_action_under_scoped",
     };
   }
-  if (roleRank(activeGrant.role) < roleRank(requiredRole)) {
+  const restrictedMinimumRole =
+    resource.classification === "restricted" && roleRank(resource.minimumRole) < roleRank("editor")
+      ? "editor"
+      : resource.minimumRole;
+  if (roleRank(activeGrant.role) < roleRank(restrictedMinimumRole)) {
+    if (resource.classification === "restricted") {
+      return {
+        outcome: "require_approval",
+        risk: "high",
+        reasonCode: "restricted_file_requires_temporary_elevation",
+      };
+    }
     return {
       outcome: "deny",
       risk: "high",

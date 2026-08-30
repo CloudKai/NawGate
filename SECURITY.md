@@ -29,6 +29,9 @@ credentials, personal data, or exploit details in an issue.
   arbitrary internal process already running in a container.
 - Runtime credential redaction is exact-token best effort; use the disposable
   container Runtime for protected-action demonstrations.
+- The Security Lab is an explicitly enabled local/demo helper that invokes the
+  same RuntimeGateway and returns redacted evidence. It is not enabled by
+  default and is not a substitute for production test tooling.
 - No CSRF protection
 - No per-Agent container boundary in ECS mode
 - Ordinary local containers, not hardened multi-tenant sandboxes

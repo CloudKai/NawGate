@@ -7,6 +7,8 @@ import type {
   HumanId,
   Message,
   SystemInfo,
+  SecurityLabResult,
+  SecurityLabScenario,
 } from "./types";
 
 export class ApiError extends Error {
@@ -110,6 +112,19 @@ export const api = {
       "/api/agents/" + id + "/revoke-access",
       { method: "POST" },
     ),
+  securityLab: (id: string, scenario: SecurityLabScenario) =>
+    request<SecurityLabResult>("/api/agents/" + id + "/security-lab", {
+      method: "POST",
+      body: JSON.stringify({ scenario }),
+    }),
+  continueSecurityLabJit: (id: string, scenarioId: string) =>
+    request<SecurityLabResult>("/api/agents/" + id + "/security-lab/" + scenarioId + "/continue", {
+      method: "POST",
+    }),
+  cancelSecurityLabJit: (id: string, scenarioId: string) =>
+    request<SecurityLabResult>("/api/agents/" + id + "/security-lab/" + scenarioId + "/cancel", {
+      method: "POST",
+    }),
   system: () => request<SystemInfo>("/api/system"),
   listAgents: () => request<{ agents: Agent[] }>("/api/agents"),
   createAgent: (body: {

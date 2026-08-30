@@ -729,6 +729,7 @@ export default function App() {
               grantBusyId={grantBusyId}
               onEnrollGrant={(role) => void enrollTeamGrant(role)}
               onRevokeGrant={(grantId) => void revokeTeamGrant(grantId)}
+              onLabStateChanged={() => void refreshGate(selected.id)}
             />
           </>
         ) : (

@@ -11,6 +11,21 @@ afterEach(async () => {
 });
 
 describe("model provider configuration", () => {
+  it("keeps the Security Lab disabled unless explicitly set to true", () => {
+    expect(loadConfig({ NODE_ENV: "test" }).securityLabEnabled).toBe(false);
+    expect(
+      loadConfig({ NODE_ENV: "test", AGENTGATE_SECURITY_LAB_ENABLED: "true" })
+        .securityLabEnabled,
+    ).toBe(true);
+    expect(
+      loadConfig({ NODE_ENV: "test", AGENTGATE_SECURITY_LAB_ENABLED: "false" })
+        .securityLabEnabled,
+    ).toBe(false);
+    expect(() =>
+      loadConfig({ NODE_ENV: "test", AGENTGATE_SECURITY_LAB_ENABLED: "yes" }),
+    ).toThrow();
+  });
+
   it("preserves the Ark configuration path", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-config-test-"));
     temporaryDirectories.push(root);
