@@ -73,7 +73,7 @@ Runtime cannot assert any of them. See the
 ## Architecture
 
 Open the judge-facing [interactive architecture](docs/agentgate/architecture.html),
-its editable [Archify source](docs/agentgate/architecture.archify.json), or the
+its interactive [Archify architecture](docs/agentgate/architecture.html), or the
 compact [GitHub-readable architecture](docs/agentgate/architecture.md).
 
 ```text
@@ -377,7 +377,6 @@ container engine completed it successfully.
 - [Architecture](docs/ARCHITECTURE.md)
 - [AgentGate architecture (interactive)](docs/agentgate/architecture.html)
 - [AgentGate architecture (Markdown)](docs/agentgate/architecture.md)
-- [AgentGate architecture source](docs/agentgate/architecture.archify.json)
 - [AgentGate decisions](docs/agentgate/decisions.md)
 - [AgentGate standards alignment](docs/agentgate/standards.md)
 - [Local POC](docs/LOCAL_POC.md)

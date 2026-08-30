@@ -1,8 +1,6 @@
 # AgentGate architecture
 
 Interactive architecture: [architecture.html](architecture.html)
-Editable Archify source: [architecture.archify.json](architecture.archify.json)
-
 The interactive map is source-evidence-backed to commit
 `028013c809134303a2d60dd0acff86efe9f4d156`. It is the judge-facing overview;
 this page is the concise GitHub-readable companion.
