@@ -70,7 +70,7 @@ export interface ApprovalRecord {
   resourceId: string;
   risk: "high";
   reasonCode: string;
-  status: "pending" | "approved" | "denied" | "expired" | "consumed";
+  status: "pending" | "approved" | "denied" | "expired" | "consumed" | "revoked";
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
@@ -93,4 +93,8 @@ export interface AuditEvent {
   capabilityId: string | null;
   status: "success" | "failure" | "pending";
   durationMs: number | null;
+  policyVersion: string | null;
+  explanation: string | null;
+  enforcementPoint: string | null;
+  protectedActionExecuted: boolean | null;
 }

@@ -8,6 +8,7 @@ import type {
   AuditStatus,
   HumanId,
 } from "./types.js";
+import { AGENTGATE_POLICY_VERSION } from "./types.js";
 import { JsonStore } from "../store.js";
 
 export interface AuditEventInput {
@@ -25,6 +26,10 @@ export interface AuditEventInput {
   capabilityId: string | null;
   status: AuditStatus;
   durationMs: number | null;
+  policyVersion?: string | null;
+  explanation?: string | null;
+  enforcementPoint?: string | null;
+  protectedActionExecuted?: boolean | null;
 }
 
 export class AuditService {
@@ -48,6 +53,12 @@ export class AuditService {
       createdAt: this.now(),
       ...input,
       resourceId: safeResourceId,
+      policyVersion:
+        input.policyVersion ??
+        (input.eventType.startsWith("policy.") ? AGENTGATE_POLICY_VERSION : null),
+      explanation: input.explanation ?? null,
+      enforcementPoint: input.enforcementPoint ?? null,
+      protectedActionExecuted: input.protectedActionExecuted ?? null,
     };
     await this.store.mutate((database) => {
       database.auditEvents.push(event);

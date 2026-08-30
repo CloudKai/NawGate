@@ -1,0 +1,28 @@
+# AgentGate decisions
+
+## Bouncer is the single selected track
+
+Identity and authorization is the primary story. Approval, one-use
+delegation, revocation, and audit evidence support that story; they are not
+separate middleware products.
+
+## Registered actions only
+
+The gateway currently protects `resource.read`, `deploy.staging`, and
+`deploy.production`. This keeps the security claim precise: AgentGate is not a
+universal interceptor for Codex's internal shell or file tools.
+
+## In-memory capability leases with durable approval state
+
+Approval records are stored in the existing JSON store. The one-use capability
+is held in memory and is recreated only by a fresh owner approval. A restart
+therefore fails closed for an approved record whose ephemeral lease is gone.
+
+## Provider-neutral model configuration
+
+The Runtime can use Volcengine Ark or an OpenAI-compatible Responses endpoint.
+Model choice does not participate in authorization; the backend policy and
+gateway remain the enforcement authority.
+
+Agent-to-agent delegation remains out of scope for the MVP and is a future
+stretch only.

@@ -900,6 +900,34 @@ textarea:focus {
   margin-bottom: 18px;
 }
 
+.revocation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 18px;
+  padding: 11px 13px;
+  border: 1px solid #efd4d1;
+  border-radius: 11px;
+  background: #fff5f3;
+}
+
+.revocation-bar strong,
+.revocation-bar span {
+  display: block;
+}
+
+.revocation-bar strong {
+  color: #984545;
+  font-size: 11px;
+}
+
+.revocation-bar span {
+  margin-top: 3px;
+  color: #8f7270;
+  font-size: 10px;
+}
+
 .agentgate-panel-heading h2 {
   margin: 4px 0 0;
   font-size: 17px;
@@ -1079,6 +1107,91 @@ textarea:focus {
 .audit-event-copy > span {
   color: #999890;
   font-size: 9px;
+}
+
+.audit-explanation {
+  margin: 5px 0 0;
+  color: #6d6d66;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.audit-event-copy small {
+  display: block;
+  margin-top: 4px;
+  color: #aaa9a0;
+  font-size: 8px;
+}
+
+.delegation-receipt {
+  margin-top: 20px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+
+.receipt-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.receipt-heading h3 {
+  margin: 4px 0 0;
+  color: #4c4d47;
+  font-size: 14px;
+}
+
+.receipt-status {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #5745b4;
+  background: var(--purple-soft);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.receipt-status-consumed,
+.receipt-status-revoked,
+.receipt-status-denied,
+.receipt-status-expired {
+  color: #984545;
+  background: #f8e7e4;
+}
+
+.receipt-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.receipt-grid div {
+  min-width: 0;
+}
+
+.receipt-grid dt {
+  color: #9a9890;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.receipt-grid dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #565750;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receipt-explanation {
+  margin: 12px 0 0;
+  color: #777870;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .audit-event-copy > span {
@@ -1325,6 +1438,10 @@ textarea:focus {
 
   .agentgate-grid {
     grid-template-columns: 1fr;
+  }
+
+  .receipt-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .agentgate-panel {

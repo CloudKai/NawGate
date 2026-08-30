@@ -68,9 +68,10 @@ export const api = {
     humanSessionToken = session.sessionToken;
     return session;
   },
-  approvals: (id: string, status: ApprovalRecord["status"] = "pending") =>
+  approvals: (id: string, status?: ApprovalRecord["status"]) =>
     request<{ approvals: ApprovalRecord[] }>(
-      "/api/agents/" + id + "/approvals?status=" + encodeURIComponent(status),
+      "/api/agents/" + id + "/approvals" +
+        (status ? "?status=" + encodeURIComponent(status) : ""),
     ),
   audit: (id: string, runId?: string, limit = 20) =>
     request<{ audit: AuditEvent[] }>(
@@ -88,6 +89,11 @@ export const api = {
     request<{ approval: ApprovalRecord }>("/api/approvals/" + id + "/deny", {
       method: "POST",
     }),
+  revokeAccess: (id: string) =>
+    request<{ runId: string; status: "revoked"; approvalsRevoked: number }>(
+      "/api/agents/" + id + "/revoke-access",
+      { method: "POST" },
+    ),
   system: () => request<SystemInfo>("/api/system"),
   listAgents: () => request<{ agents: Agent[] }>("/api/agents"),
   createAgent: (body: {

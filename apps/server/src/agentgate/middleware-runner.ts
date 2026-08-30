@@ -31,6 +31,25 @@ export class MiddlewareRunner implements AgentRunner {
     );
     try {
       await this.audit.record({
+        eventType: "runtime_identity.issued",
+        humanId: request.ownerUserId,
+        agentId: request.agentId,
+        runId: request.runId,
+        requestId: null,
+        action: null,
+        resourceId: null,
+        decision: null,
+        risk: null,
+        reasonCode: "run_started",
+        approvalId: null,
+        capabilityId: null,
+        status: "success",
+        durationMs: 0,
+        explanation: "A short-lived Run identity was issued; the raw credential is never audited.",
+        enforcementPoint: "MiddlewareRunner",
+        protectedActionExecuted: false,
+      });
+      await this.audit.record({
         eventType: "run.started",
         humanId: request.ownerUserId,
         agentId: request.agentId,
@@ -109,6 +128,25 @@ export class MiddlewareRunner implements AgentRunner {
       throw error;
     } finally {
       this.credentials.revoke(request.runId);
+      await this.audit.record({
+        eventType: "runtime_identity.revoked",
+        humanId: request.ownerUserId,
+        agentId: request.agentId,
+        runId: request.runId,
+        requestId: null,
+        action: null,
+        resourceId: null,
+        decision: "deny",
+        risk: null,
+        reasonCode: "run_finished",
+        approvalId: null,
+        capabilityId: null,
+        status: "success",
+        durationMs: Date.now() - startedAt,
+        explanation: "The short-lived Run identity was revoked during lifecycle cleanup.",
+        enforcementPoint: "MiddlewareRunner",
+        protectedActionExecuted: false,
+      });
     }
   }
 

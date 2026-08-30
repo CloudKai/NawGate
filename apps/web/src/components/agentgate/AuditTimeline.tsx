@@ -16,6 +16,9 @@ function decisionLabel(event: AuditEvent): string {
     "approval.approved": "APPROVED",
     "approval.denied": "DENIED",
     "approval.expired": "EXPIRED",
+    "approval.revoked": "APPROVAL REVOKED",
+    "runtime_identity.issued": "RUN IDENTITY ISSUED",
+    "runtime_identity.revoked": "RUN IDENTITY REVOKED",
     "capability.issued": "CAPABILITY ISSUED",
     "capability.consumed": "CAPABILITY CONSUMED",
     "protected_action.succeeded": "SUCCESS",
@@ -42,6 +45,13 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
               <time>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
             </div>
             <span>{label(event.action)} · {label(event.resourceId)} · {label(event.reasonCode)}</span>
+            {event.explanation && <p className="audit-explanation">{event.explanation}</p>}
+            {(event.policyVersion || event.enforcementPoint) && (
+              <small>
+                {event.policyVersion ?? "No policy version"} · {event.enforcementPoint ?? "Unknown enforcement point"}
+                {event.protectedActionExecuted === true ? " · side effect executed" : " · no side effect"}
+              </small>
+            )}
           </div>
         </li>
       ))}

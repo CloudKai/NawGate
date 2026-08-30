@@ -58,8 +58,10 @@ export default function App() {
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [actor, setActor] = useState<HumanPrincipal | null>(null);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+  const [revocationBusy, setRevocationBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
@@ -94,12 +96,14 @@ export default function App() {
   }, []);
 
   const refreshGate = useCallback(async (agentId: string) => {
-    const [approvalResult, auditResult] = await Promise.all([
+    const [pendingResult, allApprovalResult, auditResult] = await Promise.all([
+      api.approvals(agentId, "pending"),
       api.approvals(agentId),
       api.audit(agentId),
     ]);
     if (mountedRef.current && selectedIdRef.current === agentId) {
-      setApprovals(approvalResult.approvals);
+      setApprovals(pendingResult.approvals);
+      setApprovalHistory(allApprovalResult.approvals);
       setAudit(auditResult.audit);
     }
   }, []);
@@ -129,11 +133,13 @@ export default function App() {
     setActiveRun(null);
     setShowSettings(false);
     setApprovals([]);
+    setApprovalHistory([]);
     setAudit([]);
     if (!selectedId) {
       setMessages([]);
       return;
     }
+    let cancelled = false;
     void Promise.all([refreshMessages(selectedId), api.runs(selectedId), refreshGate(selectedId)])
       .then(([, result]) => {
         if (selectedIdRef.current !== selectedId) return;
@@ -141,13 +147,19 @@ export default function App() {
         setActiveRun(latest);
         if (latest && ["queued", "running"].includes(latest.status)) {
           void pollRun(latest.id, selectedId).catch((reason) =>
-            setError(reason instanceof Error ? reason.message : String(reason)),
+            selectedIdRef.current === selectedId &&
+              setError(reason instanceof Error ? reason.message : String(reason)),
           );
         }
       })
-      .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
+      .catch((reason) => {
+        if (!cancelled && selectedIdRef.current === selectedId) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refreshGate, refreshMessages, selectedId]);
 
   useEffect(() => {
@@ -263,6 +275,7 @@ export default function App() {
       setMessages([]);
       setActiveRun(null);
       setApprovals([]);
+      setApprovalHistory([]);
       setAudit([]);
       await refreshAgents(false);
     } catch (reason) {
@@ -284,6 +297,20 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setApprovalBusyId(null);
+    }
+  };
+
+  const revokeAccess = async () => {
+    if (!selected) return;
+    setRevocationBusy(true);
+    setError(null);
+    try {
+      await api.revokeAccess(selected.id);
+      await Promise.all([refreshAgents(), refreshGate(selected.id)]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setRevocationBusy(false);
     }
   };
 
@@ -657,10 +684,13 @@ export default function App() {
             <AgentGatePanel
               agent={selected}
               approvals={approvals}
+              approvalHistory={approvalHistory}
               audit={audit}
               busyApprovalId={approvalBusyId}
+              revocationBusy={revocationBusy}
               onApprove={(approvalId) => void decideApproval(approvalId, "approve")}
               onDeny={(approvalId) => void decideApproval(approvalId, "deny")}
+              onRevokeAccess={() => void revokeAccess()}
             />
           </>
         ) : (

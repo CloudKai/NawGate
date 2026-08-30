@@ -164,6 +164,21 @@ export class AgentService {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  getActiveRun(agentId: string, actor: HumanPrincipal): AgentRun | null {
+    this.getAgent(agentId, actor);
+    return (
+      this.store
+        .snapshot()
+        .runs
+        .filter(
+          (run) =>
+            run.agentId === agentId &&
+            (run.status === "queued" || run.status === "running"),
+        )
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null
+    );
+  }
+
   async sendMessage(
     agentId: string,
     prompt: string,

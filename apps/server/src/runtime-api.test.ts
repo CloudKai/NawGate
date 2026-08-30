@@ -23,6 +23,11 @@ const service = {
     if (actor.id !== "user-a") throw new HttpError(404, "Agent not found");
     return { ownerUserId: "user-a" };
   },
+  getActiveRun: () => ({
+    id: "00000000-0000-4000-8000-000000000002",
+    agentId: "00000000-0000-4000-8000-000000000001",
+    status: "running",
+  }),
 } as unknown as AgentService;
 
 afterEach(async () => {
@@ -212,9 +217,52 @@ describe("Runtime API boundary", () => {
         action: "resource.read",
         resourceId: "project-a",
         ownerUserId: "user-b",
+        humanId: "user-b",
+        agentId: "forged-agent",
+        runId: "forged-run",
       },
     });
     expect(forged.statusCode).toBe(400);
+  });
+
+  it("revokes an active Run and fails closed for its old runtime credential", async () => {
+    const { app, runtime } = await makeRuntimeApp();
+    const issued = runtime.credentials.issue(
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      "user-a",
+    );
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
+
+    const revoked = await app.inject({
+      method: "POST",
+      url: "/api/agents/00000000-0000-4000-8000-000000000001/revoke-access",
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-agentgate-session": sessionToken,
+      },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ status: "revoked", approvalsRevoked: 0 });
+
+    const blocked = await app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: runtimeHeaders(issued.token),
+      payload: {
+        requestId: "e315f12d-9c3c-48c2-a5d8-8c0c90d4a193",
+        action: "resource.read",
+        resourceId: "project-a",
+      },
+    });
+    expect(blocked.statusCode).toBe(401);
+    expect(blocked.json()).toMatchObject({ code: "INVALID_RUNTIME_CREDENTIAL" });
   });
 
   it("exposes approvals and audit only through the current human owner", async () => {

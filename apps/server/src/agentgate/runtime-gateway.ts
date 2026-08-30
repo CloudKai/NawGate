@@ -18,6 +18,7 @@ import type {
   ProtectedResource,
   TrustedRuntimeContext,
 } from "./types.js";
+import { AGENTGATE_POLICY_VERSION } from "./types.js";
 
 interface ProtectedResourceBoundary {
   getMetadata(resourceId: string): ProtectedResource | null;
@@ -79,6 +80,39 @@ function riskFor(action: AgentGateAction): "low" | "medium" | "high" {
   return action === "deploy.production" ? "high" : "medium";
 }
 
+function explanationFor(
+  context: TrustedRuntimeContext,
+  request: GatewayRequest,
+  resource: ProtectedResource | null,
+  reasonCode: string,
+): string {
+  if (reasonCode === "resource_owner_mismatch" && resource) {
+    return `The Agent is acting for ${context.humanId}, but ${resource.id} is owned by ${resource.ownerUserId}.`;
+  }
+  if (reasonCode === "production_deploy_requires_owner_approval") {
+    return "Production deployment is high risk and requires explicit owner approval before the protected side effect.";
+  }
+  if (reasonCode === "capability_consumed") {
+    return "The one-use approval capability has already been consumed; replay is denied.";
+  }
+  if (reasonCode === "capability_revoked") {
+    return "The owner revoked the Run authority; the approval capability is no longer usable.";
+  }
+  if (reasonCode === "approval_denied") {
+    return "The owner denied this protected action.";
+  }
+  if (reasonCode === "approval_expired") {
+    return "The approval window expired before the protected action was attempted.";
+  }
+  if (reasonCode === "unknown_resource") {
+    return "The requested resource is not registered as a protected resource.";
+  }
+  if (reasonCode === "invalid_capability" || reasonCode === "idempotency_mismatch") {
+    return "The supplied capability does not exactly match this protected action request.";
+  }
+  return `The Bouncer denied ${request.action} at the RuntimeGateway.`;
+}
+
 export class RuntimeGateway {
   private executionTail: Promise<void> = Promise.resolve();
 
@@ -120,6 +154,10 @@ export class RuntimeGateway {
         capabilityId: null,
         status: "failure",
         durationMs: Date.now() - startedAt,
+        policyVersion: AGENTGATE_POLICY_VERSION,
+        explanation: "The runtime context or protected action request was malformed.",
+        enforcementPoint: "RuntimeGateway",
+        protectedActionExecuted: false,
       });
       return {
         status: "denied",
@@ -257,6 +295,26 @@ export class RuntimeGateway {
           };
         }
         if (consumption.status === "denied") {
+          await this.audit.record({
+            eventType: "policy.deny",
+            humanId: context.humanId,
+            agentId: context.agentId,
+            runId: context.runId,
+            requestId: request.requestId,
+            action: request.action,
+            resourceId: request.resourceId,
+            decision: "deny",
+            risk: decision.risk,
+            reasonCode: consumption.reasonCode,
+            approvalId: request.approvalId,
+            capabilityId: null,
+            status: "failure",
+            durationMs: Date.now() - startedAt,
+            policyVersion: AGENTGATE_POLICY_VERSION,
+            explanation: explanationFor(context, request, resource, consumption.reasonCode),
+            enforcementPoint: "RuntimeGateway",
+            protectedActionExecuted: false,
+          });
           return {
             status: "denied",
             requestId: request.requestId,
@@ -297,6 +355,10 @@ export class RuntimeGateway {
         capabilityId: null,
         status: "success",
         durationMs: Date.now() - startedAt,
+        policyVersion: AGENTGATE_POLICY_VERSION,
+        explanation: "The RuntimeGateway authorized and completed the protected action.",
+        enforcementPoint: "RuntimeGateway",
+        protectedActionExecuted: true,
       });
       return {
         status: "success",
@@ -332,6 +394,10 @@ export class RuntimeGateway {
         capabilityId: null,
         status: "failure",
         durationMs: Date.now() - startedAt,
+        policyVersion: AGENTGATE_POLICY_VERSION,
+        explanation: "Authorization passed, but the protected action failed during execution.",
+        enforcementPoint: "RuntimeGateway",
+        protectedActionExecuted: false,
       });
       return {
         status: "failed",
@@ -410,6 +476,10 @@ export class RuntimeGateway {
             ? "failure"
             : "success",
       durationMs: Date.now() - startedAt,
+      policyVersion: AGENTGATE_POLICY_VERSION,
+      explanation: explanationFor(context, request, resource, decision.reasonCode),
+      enforcementPoint: "RuntimeGateway",
+      protectedActionExecuted: false,
     });
   }
 

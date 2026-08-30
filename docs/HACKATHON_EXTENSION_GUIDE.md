@@ -8,7 +8,7 @@ Rebuilding the UI, control plane, local Runtime, or ECS setup is out of scope.
 - Browser Agent CRUD and Playground
 - Persistent workspaces and Codex sessions
 - One-line Docker, Colima, or Podman local Runtime
-- Volcengine Ark model connection
+- Volcengine Ark or OpenAI-compatible Responses model connection
 - Optional Volcengine ECS deployment
 
 Local execution is the default judging path. Cloud deployment is optional.
@@ -26,7 +26,7 @@ Required demo:
 - Redact secrets.
 - Run one successful task and identify the failing step in one failed task.
 
-### Bouncer: identity and authorization
+### Bouncer: identity and authorization (implemented)
 
 Separate the human user from the Agent acting for that user.
 
@@ -38,6 +38,12 @@ Required demo:
 - Record the human, Agent, action, resource, and decision.
 
 A login screen without server-side authorization does not qualify.
+
+This repository's Bouncer implementation also demonstrates explicit Run
+authority revocation, one-use capability replay denial, strict identity-field
+rejection, policy-versioned explanations, and a safe Delegation Receipt. The
+registered-action scope and non-hardened container limitation are intentional;
+see [AgentGate architecture](agentgate/architecture.md).
 
 ### Kill Switch: safety and sandboxing
 

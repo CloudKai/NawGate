@@ -11,7 +11,7 @@ import { AuditService } from "./agentgate/audit-service.js";
 import { IdentityService } from "./agentgate/identity-service.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
-import type { GatewayResult, TrustedRuntimeContext } from "./agentgate/types.js";
+import { AGENTGATE_POLICY_VERSION, type GatewayResult, type TrustedRuntimeContext } from "./agentgate/types.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
@@ -39,7 +39,7 @@ const runtimeActionBody = z.object({
 }).strict();
 const runtimeApprovalParams = z.object({ id: z.string().uuid() });
 const approvalQuery = z.object({
-  status: z.enum(["pending", "approved", "denied", "expired", "consumed"]).optional(),
+  status: z.enum(["pending", "approved", "denied", "expired", "consumed", "revoked"]).optional(),
 }).strict();
 const auditQuery = z.object({
   runId: z.string().uuid().optional(),
@@ -75,7 +75,11 @@ function runtimeContext(
 }
 
 function publicGatewayCode(reasonCode: string): string {
-  if (reasonCode === "approval_denied" || reasonCode === "capability_consumed") {
+  if (
+    reasonCode === "approval_denied" ||
+    reasonCode === "capability_consumed" ||
+    reasonCode === "capability_revoked"
+  ) {
     return "APPROVAL_DENIED";
   }
   if (reasonCode === "approval_expired") return "APPROVAL_EXPIRED";
@@ -113,9 +117,12 @@ function sendRuntimeResult(reply: {
       action: result.action,
       resourceId: result.resourceId,
       code: publicGatewayCode(result.reasonCode),
+      reasonCode: result.reasonCode,
       message:
         result.reasonCode === "approval_denied"
           ? "The owner did not approve this protected action."
+          : result.reasonCode === "capability_revoked"
+            ? "The owner revoked this Run's protected-action authority."
           : "This Agent is not permitted to perform that protected action.",
     });
   }
@@ -140,8 +147,10 @@ function throwApprovalHttpError(error: unknown): never {
       ? 404
       : error.code === "APPROVAL_EXPIRED"
         ? 410
-        : error.code === "APPROVAL_NOT_OWNED"
+      : error.code === "APPROVAL_NOT_OWNED"
           ? 403
+          : error.code === "APPROVAL_REVOKED"
+            ? 409
           : 409;
   throw new HttpError(statusCode, "Approval request cannot be changed", error.code);
 }
@@ -236,6 +245,42 @@ export async function createApp(
       return { audit: events.slice(Math.max(0, events.length - query.limit)) };
     });
 
+    app.post("/api/agents/:id/revoke-access", async (request) => {
+      const { id } = agentIdParams.parse(request.params);
+      const actor = humanActor(request);
+      const activeRun = service.getActiveRun(id, actor);
+      if (!activeRun) {
+        throw new HttpError(409, "No active Run to revoke");
+      }
+      runtime.credentials.revokeAuthority(activeRun.id);
+      const revokedApprovals = await runtime.approvals.revokeForRun(activeRun.id);
+      await runtime.audit.record({
+        eventType: "runtime_identity.revoked",
+        humanId: actor.id,
+        agentId: id,
+        runId: activeRun.id,
+        requestId: null,
+        action: null,
+        resourceId: null,
+        decision: "deny",
+        risk: "high",
+        reasonCode: "owner_revoked",
+        approvalId: null,
+        capabilityId: null,
+        status: "success",
+        durationMs: null,
+        policyVersion: AGENTGATE_POLICY_VERSION,
+        explanation: "The owner revoked the active Run authority; future protected requests fail closed.",
+        enforcementPoint: "RuntimeGateway",
+        protectedActionExecuted: false,
+      });
+      return {
+        runId: activeRun.id,
+        status: "revoked" as const,
+        approvalsRevoked: revokedApprovals.length,
+      };
+    });
+
     app.post("/api/approvals/:id/approve", async (request) => {
       const { id } = runtimeApprovalParams.parse(request.params);
       const actor = humanActor(request);
@@ -300,6 +345,9 @@ export async function createApp(
         return reply.code(200).send({ status: "denied", code: "APPROVAL_DENIED" });
       }
       if (approval.status === "consumed") {
+        return reply.code(200).send({ status: "denied", code: "APPROVAL_DENIED" });
+      }
+      if (approval.status === "revoked") {
         return reply.code(200).send({ status: "denied", code: "APPROVAL_DENIED" });
       }
       const capabilityStatus = runtime.approvals.capabilityStatus(approval.id);

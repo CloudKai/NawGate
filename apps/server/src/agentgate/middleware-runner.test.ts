@@ -90,8 +90,10 @@ describe("MiddlewareRunner", () => {
     await expect(runner.run(request)).rejects.toBeInstanceOf(RunCancelledError);
     expect(credentials.activeCount()).toBe(0);
     expect(audit.list("agent-a").map((event) => event.eventType)).toEqual([
+      "runtime_identity.issued",
       "run.started",
       "run.cancelled",
+      "runtime_identity.revoked",
     ]);
   });
 

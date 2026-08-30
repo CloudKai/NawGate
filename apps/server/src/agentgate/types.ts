@@ -1,5 +1,9 @@
 export type HumanId = "user-a" | "user-b";
 
+// Keep the policy contract visible in every meaningful decision trail. A
+// version bump is required when the authorization semantics change.
+export const AGENTGATE_POLICY_VERSION = "bouncer-v1";
+
 export interface HumanPrincipal {
   id: HumanId;
   name: string;
@@ -82,6 +86,7 @@ export type GatewayDenyReasonCode =
   | "approval_denied"
   | "approval_expired"
   | "capability_consumed"
+  | "capability_revoked"
   | "invalid_capability";
 
 export type GatewayResult =
@@ -141,7 +146,7 @@ export interface ApprovalRecord {
   resourceId: string;
   risk: "high";
   reasonCode: string;
-  status: "pending" | "approved" | "denied" | "expired" | "consumed";
+  status: "pending" | "approved" | "denied" | "expired" | "consumed" | "revoked";
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
@@ -172,6 +177,9 @@ export type AuditEventType =
   | "approval.approved"
   | "approval.denied"
   | "approval.expired"
+  | "approval.revoked"
+  | "runtime_identity.issued"
+  | "runtime_identity.revoked"
   | "capability.issued"
   | "capability.consumed"
   | "protected_action.succeeded"
@@ -198,6 +206,10 @@ export interface AuditEvent {
   capabilityId: string | null;
   status: AuditStatus;
   durationMs: number | null;
+  policyVersion: string | null;
+  explanation: string | null;
+  enforcementPoint: string | null;
+  protectedActionExecuted: boolean | null;
 }
 
 export interface ActionExecutionRecord {

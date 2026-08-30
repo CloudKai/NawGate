@@ -32,6 +32,17 @@ Volcengine ECS.
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
+## Selected middleware track: Bouncer
+
+AgentGate demonstrates backend-enforced delegated access. A Run gets a scoped
+short-lived identity, the Bouncer checks the backend-owned human/Agent/resource
+relationship, and only the RuntimeGateway can invoke a registered protected
+action. User A can read `project-a`; User B's resource is denied. Production
+deploy requires owner approval, produces a one-use capability, and leaves a
+redacted audit trail. Owner revocation invalidates the active Run identity and
+its capabilities. See the [AgentGate overview](docs/agentgate/overview.md) and
+[three-minute demo](docs/agentgate/demo.md).
+
 ## Requirements
 
 - Node.js 22+
@@ -123,6 +134,10 @@ are intentionally not injected into `local-process` Runs because the Agent and
 server child process share a filesystem there; use the disposable container
 Runtime for the protected-action demo. Normal coding Runs continue to work in
 either provider.
+
+The Web UI also exposes a **Delegation receipt** for the latest approval and a
+**Revoke access** control while a Run is active. These controls show safe
+metadata and status only; they do not expose credentials or protected payloads.
 
 ### 5. Stop and resume
 
@@ -269,6 +284,7 @@ boundaries.
 
 ```bash
 npm run check
+CONTAINER_ENGINE=docker npm run test:container  # optional real-container smoke
 terraform fmt -check -recursive deploy/volcengine
 docker compose config
 ```
@@ -276,6 +292,8 @@ docker compose config
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [AgentGate architecture](docs/agentgate/architecture.md)
+- [AgentGate decisions](docs/agentgate/decisions.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)

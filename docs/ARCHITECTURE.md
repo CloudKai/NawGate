@@ -11,9 +11,16 @@ flowchart LR
     Service --> Runner{"AgentRunner"}
     Runner -->|Local POC| Container["Disposable Runtime container"]
     Runner -->|ECS| Process["Codex child process"]
-    Container --> Ark["Volcengine Ark"]
-    Process --> Ark
+    Container --> Provider["Ark / OpenAI-compatible Responses API"]
+    Process --> Provider
 ```
+
+AgentGate is the selected Bouncer middleware track. Its public flow and trust
+boundaries are documented in [AgentGate architecture](agentgate/architecture.md).
+Each Run receives a short-lived backend-owned runtime identity. `PolicyEngine`
+decides, `RuntimeGateway` enforces, and protected actions are executed only
+behind the registered-resource boundary. Owner revocation invalidates the Run
+identity and active capabilities; replay and cross-owner requests fail closed.
 
 ## Components
 
@@ -75,7 +82,7 @@ the stored Codex thread, and escalate termination after a grace period.
 | Track | Primary seam | Expected change |
 | --- | --- | --- |
 | Glass Box | `AgentRunner`, `AgentRun` | Emit and display correlated execution events. |
-| Bouncer | API routes, Agent ownership | Add identity and server-side authorization. |
+| Bouncer | API routes, Agent ownership | Backend identity, authorization, approval, revocation, and audit evidence. |
 | Kill Switch | `AgentRunner` | Add threat-specific policy or a stronger sandbox. |
 
 The current container or ECS instance is the POC trust boundary. Ordinary

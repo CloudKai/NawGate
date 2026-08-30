@@ -8,6 +8,7 @@ import { AuditService } from "./audit-service.js";
 import { ProtectedResourceService } from "./protected-resource-service.js";
 import { RuntimeGateway } from "./runtime-gateway.js";
 import { JsonStore } from "../store.js";
+import { AGENTGATE_POLICY_VERSION } from "./types.js";
 
 const temporaryDirectories: string[] = [];
 const context = { humanId: "user-a" as const, agentId: "agent-a", runId: "run-a" };
@@ -123,6 +124,12 @@ describe("RuntimeGateway", () => {
         "protected_action.succeeded",
       ]),
     );
+    expect(
+      audit
+        .list("agent-a")
+        .filter((event) => event.eventType.startsWith("policy."))
+        .every((event) => event.policyVersion === AGENTGATE_POLICY_VERSION),
+    ).toBe(true);
 
     const replay = await gateway.execute(context, {
       requestId: "request-production",
@@ -132,6 +139,28 @@ describe("RuntimeGateway", () => {
     });
     expect(replay).toMatchObject({ status: "success" });
     expect(resources.getExecutionCount("deploy.production", "production")).toBe(1);
+
+    const hostileReplay = await gateway.execute(context, {
+      requestId: "f3b9c3c6-ef9a-45f0-8d28-99b9cfb2b8b1",
+      action: "deploy.production",
+      resourceId: "production",
+      approvalId: result.approvalId,
+    });
+    expect(hostileReplay).toMatchObject({
+      status: "denied",
+      reasonCode: "capability_consumed",
+    });
+    expect(resources.getExecutionCount("deploy.production", "production")).toBe(1);
+    expect(audit.list("agent-a")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "policy.deny",
+          reasonCode: "capability_consumed",
+          protectedActionExecuted: false,
+          policyVersion: AGENTGATE_POLICY_VERSION,
+        }),
+      ]),
+    );
   });
 
   it("executes an allowed staging deploy", async () => {

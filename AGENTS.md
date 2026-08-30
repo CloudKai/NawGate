@@ -16,12 +16,16 @@ Do not turn this into several unrelated middleware tracks.
 
 1. actual repository code and tests;
 2. this `AGENTS.md`;
-3. `context/security-model.md` and `context/policy-contract.md`;
-4. `context/architecture.md` and `context/runtime-protocol.md`;
-5. `context/api-contract.md`;
-6. `context/build-plan.md`;
-7. remaining context files;
-8. general model knowledge.
+3. tracked `docs/agentgate/overview.md`, `docs/agentgate/architecture.md`,
+   `docs/agentgate/decisions.md`, and `docs/agentgate/demo.md`;
+4. remaining tracked documentation;
+5. local `context/` and `design/` files, when present, as non-authoritative
+   planning artifacts;
+6. general model knowledge.
+
+The local `context/` and `design/` directories are intentionally gitignored.
+Do not make a fresh clone depend on them; update the tracked public docs when
+the implementation changes.
 
 ## Required first action in each fresh session
 
@@ -91,6 +95,21 @@ Revoke it on Run completion, failure, or cancellation.
 
 Never log or persist the raw runtime credential.
 
+### Explicit revocation
+
+An owner can revoke an active Run's runtime authority. Revocation invalidates
+the current credential, blocks a queued credential from being minted, and
+invalidates pending or approved one-use capabilities. The revocation decision
+must be audited with a safe explanation. This is authority revocation, not a
+claim that every internal Codex shell operation is forcibly terminated.
+
+### Policy evidence
+
+Meaningful policy decisions carry the central AgentGate policy version,
+explanation, enforcement point, and whether a protected side effect executed.
+The Web UI may display a safe Delegation Receipt, but never a secret or
+protected payload.
+
 ### Preserve the starter
 
 Do not break:
@@ -143,6 +162,7 @@ apps/web/src/components/agentgate/
   AgentGatePanel.tsx
   ApprovalCard.tsx
   AuditTimeline.tsx
+  DelegationReceipt.tsx
 ```
 
 ## Security coding rules
@@ -182,6 +202,7 @@ MVP is not done until:
 - high-risk production action creates human approval;
 - only owner can approve;
 - approval creates exact short-lived one-use capability;
+- owner revocation invalidates active Run authority and capabilities;
 - action succeeds once;
 - replay/expiry is denied;
 - every decision produces redacted audit evidence;

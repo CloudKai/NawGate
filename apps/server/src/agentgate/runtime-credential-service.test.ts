@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  RuntimeAuthorityRevokedError,
   RuntimeCredentialService,
 } from "./runtime-credential-service.js";
 
@@ -28,5 +29,18 @@ describe("RuntimeCredentialService", () => {
     credentials.revoke("run-active");
     expect(credentials.resolve(active.token)).toEqual({ status: "invalid" });
     expect(credentials.activeCount()).toBe(0);
+  });
+
+  it("revokes Run authority and prevents a queued runner from minting again", () => {
+    const credentials = new RuntimeCredentialService(() => 1_000, 10_000);
+    const issued = credentials.issue("agent-a", "run-revoked", "user-a");
+
+    credentials.revokeAuthority("run-revoked");
+
+    expect(credentials.isAuthorityRevoked("run-revoked")).toBe(true);
+    expect(credentials.resolve(issued.token)).toEqual({ status: "invalid" });
+    expect(() => credentials.issue("agent-a", "run-revoked", "user-a")).toThrow(
+      RuntimeAuthorityRevokedError,
+    );
   });
 });

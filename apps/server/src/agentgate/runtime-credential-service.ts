@@ -28,6 +28,7 @@ export type RuntimeCredentialResolution =
 
 export class RuntimeCredentialService {
   private readonly credentials = new Map<string, CredentialRecord>();
+  private readonly revokedRunIds = new Set<string>();
 
   constructor(
     private readonly now: () => number = Date.now,
@@ -39,6 +40,9 @@ export class RuntimeCredentialService {
     runId: string,
     ownerUserId: HumanId,
   ): IssuedRuntimeCredential {
+    if (this.revokedRunIds.has(runId)) {
+      throw new RuntimeAuthorityRevokedError(runId);
+    }
     const issuedAt = this.now();
     const expiresAt = issuedAt + this.ttlMs;
     const context: TrustedRuntimeContext = { agentId, runId, humanId: ownerUserId };
@@ -75,12 +79,33 @@ export class RuntimeCredentialService {
     }
   }
 
+  /**
+   * Explicitly revoke the Run's authority. This is intentionally separate
+   * from normal lifecycle cleanup: a queued runner must not be able to mint a
+   * fresh credential after an owner has revoked access.
+   */
+  revokeAuthority(runId: string): void {
+    this.revokedRunIds.add(runId);
+    this.revoke(runId);
+  }
+
+  isAuthorityRevoked(runId: string): boolean {
+    return this.revokedRunIds.has(runId);
+  }
+
   activeCount(): number {
     return this.credentials.size;
   }
 
   private hash(token: string): string {
     return createHash("sha256").update(token).digest("base64url");
+  }
+}
+
+export class RuntimeAuthorityRevokedError extends Error {
+  constructor(runId: string) {
+    super(`Runtime authority revoked for Run ${runId}`);
+    this.name = "RuntimeAuthorityRevokedError";
   }
 }
 

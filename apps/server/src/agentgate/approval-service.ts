@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AuditService } from "./audit-service.js";
-import type { ApprovalRecord, AgentGateAction, CapabilityLease, HumanId } from "./types.js";
+import { AGENTGATE_POLICY_VERSION, type ApprovalRecord, type AgentGateAction, type CapabilityLease, type HumanId } from "./types.js";
 import { JsonStore } from "../store.js";
 
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1_000;
@@ -20,7 +20,7 @@ export type CapabilityConsumption =
   | { status: "pending"; approval: ApprovalRecord }
   | {
       status: "denied";
-      reasonCode: "approval_denied" | "approval_expired" | "capability_consumed" | "invalid_capability";
+      reasonCode: "approval_denied" | "approval_expired" | "capability_consumed" | "capability_revoked" | "invalid_capability";
     };
 
 export type ApprovalErrorCode =
@@ -28,6 +28,7 @@ export type ApprovalErrorCode =
   | "APPROVAL_NOT_OWNED"
   | "APPROVAL_EXPIRED"
   | "APPROVAL_DENIED"
+  | "APPROVAL_REVOKED"
   | "APPROVAL_ALREADY_DECIDED"
   | "IDEMPOTENCY_MISMATCH";
 
@@ -180,6 +181,9 @@ export class ApprovalService {
       if (approval.status === "denied") {
         throw new ApprovalError("APPROVAL_DENIED", "Approval was denied");
       }
+      if (approval.status === "revoked") {
+        throw new ApprovalError("APPROVAL_REVOKED", "Approval was revoked");
+      }
       if (approval.status !== "pending") {
         throw new ApprovalError("APPROVAL_ALREADY_DECIDED", "Approval is no longer pending");
       }
@@ -244,11 +248,14 @@ export class ApprovalService {
       capabilityId: outcome.capability.id,
       status: "success",
       durationMs: null,
+      policyVersion: AGENTGATE_POLICY_VERSION,
     });
     return outcome;
   }
 
-  capabilityStatus(approvalId: string): "usable" | "expired" | "missing" {
+  capabilityStatus(approvalId: string): "usable" | "expired" | "missing" | "revoked" {
+    const approval = this.store.snapshot().approvals.find((candidate) => candidate.id === approvalId);
+    if (approval?.status === "revoked") return "revoked";
     const capability = this.capabilities.get(approvalId);
     if (!capability || capability.remainingUses === 0) return "missing";
     return this.isExpired(capability) ? "expired" : "usable";
@@ -268,6 +275,9 @@ export class ApprovalService {
       } else if (record.status === "expired") {
         throw new ApprovalError("APPROVAL_EXPIRED", "Approval has expired");
       } else if (record.status !== "pending") {
+        if (record.status === "revoked") {
+          throw new ApprovalError("APPROVAL_REVOKED", "Approval was revoked");
+        }
         throw new ApprovalError("APPROVAL_ALREADY_DECIDED", "Approval is no longer pending");
       } else {
         record.status = "denied";
@@ -302,7 +312,19 @@ export class ApprovalService {
     let expiredApproval: ApprovalRecord | null = null;
     const outcome = await this.store.mutate<CapabilityConsumption>((database) => {
       const approval = database.approvals.find((candidate) => candidate.id === request.approvalId);
-      if (!approval || !sameRequest(request, approval)) {
+      if (!approval) {
+        return { status: "denied", reasonCode: "invalid_capability" };
+      }
+      // Check terminal state before request binding so a replay with a fresh
+      // requestId is reported as consumed/revoked without ever accepting a
+      // capability for a different target.
+      if (approval.status === "consumed") {
+        return { status: "denied", reasonCode: "capability_consumed" };
+      }
+      if (approval.status === "revoked") {
+        return { status: "denied", reasonCode: "capability_revoked" };
+      }
+      if (!sameRequest(request, approval)) {
         return { status: "denied", reasonCode: "invalid_capability" };
       }
       if (approval.status === "pending" && this.isExpired(approval)) {
@@ -315,9 +337,6 @@ export class ApprovalService {
       }
       if (approval.status === "expired") {
         return { status: "denied", reasonCode: "approval_expired" };
-      }
-      if (approval.status === "consumed") {
-        return { status: "denied", reasonCode: "capability_consumed" };
       }
       if (approval.status !== "approved") {
         return { status: "denied", reasonCode: "invalid_capability" };
@@ -359,6 +378,45 @@ export class ApprovalService {
       });
     }
     return outcome;
+  }
+
+  async revokeForRun(runId: string, reasonCode = "owner_revoked"): Promise<ApprovalRecord[]> {
+    const revoked = await this.store.mutate((database) => {
+      const changed: ApprovalRecord[] = [];
+      for (const approval of database.approvals) {
+        if (approval.runId !== runId || !["pending", "approved"].includes(approval.status)) {
+          continue;
+        }
+        approval.status = "revoked";
+        approval.decidedAt = new Date(this.now()).toISOString();
+        changed.push(structuredClone(approval));
+      }
+      return changed;
+    });
+    for (const approval of revoked) {
+      this.capabilities.delete(approval.id);
+      await this.audit.record({
+        eventType: "approval.revoked",
+        humanId: approval.humanId,
+        agentId: approval.agentId,
+        runId: approval.runId,
+        requestId: approval.requestId,
+        action: approval.action,
+        resourceId: approval.resourceId,
+        decision: "deny",
+        risk: "high",
+        reasonCode,
+        approvalId: approval.id,
+        capabilityId: null,
+        status: "failure",
+        durationMs: null,
+        policyVersion: AGENTGATE_POLICY_VERSION,
+        explanation: "Owner revoked the Run's authority before the protected action could execute.",
+        enforcementPoint: "ApprovalService",
+        protectedActionExecuted: false,
+      });
+    }
+    return revoked;
   }
 
   private isExpired(value: { expiresAt: string }): boolean {
