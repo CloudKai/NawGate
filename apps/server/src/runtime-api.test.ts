@@ -225,6 +225,45 @@ describe("Runtime API boundary", () => {
     expect(forged.statusCode).toBe(400);
   });
 
+  it("routes team-file reads through the runtime credential and rejects the wrong team", async () => {
+    const { app, runtime, resources } = await makeRuntimeApp();
+    const viewer = runtime.credentials.issue("agent-b", "run-team-b", "user-b");
+    const internal = await app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: runtimeHeaders(viewer.token),
+      payload: {
+        requestId: "6f4e5d3c-2b1a-4908-8765-43210fedcba9",
+        action: "file.read",
+        resourceId: "team-alpha-internal",
+      },
+    });
+    expect(internal.statusCode).toBe(200);
+    expect(internal.json()).toMatchObject({
+      status: "success",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+      result: { content: "Synthetic internal Team Alpha file." },
+    });
+
+    const wrongTeam = await app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: runtimeHeaders(runtime.credentials.issue("agent-a", "run-team-a", "user-a").token),
+      payload: {
+        requestId: "7f4e5d3c-2b1a-4908-8765-43210fedcba9",
+        action: "file.read",
+        resourceId: "team-beta-internal",
+      },
+    });
+    expect(wrongTeam.statusCode).toBe(403);
+    expect(wrongTeam.json()).toMatchObject({
+      status: "denied",
+      reasonCode: "team_membership_missing",
+    });
+    expect(resources.getExecutionCount("file.read", "team-beta-internal")).toBe(0);
+  });
+
   it("revokes an active Run and fails closed for its old runtime credential", async () => {
     const { app, runtime } = await makeRuntimeApp();
     const issued = runtime.credentials.issue(

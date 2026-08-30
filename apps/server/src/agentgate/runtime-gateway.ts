@@ -5,6 +5,7 @@ import {
 } from "./approval-service.js";
 import { AuditService } from "./audit-service.js";
 import { isHumanId } from "./demo-users.js";
+import { TeamMembershipService, type MembershipResolver } from "./team-membership-service.js";
 import type { JsonStore } from "../store.js";
 import type {
   ActionExecutionRecord,
@@ -50,6 +51,9 @@ function isRuntimeContext(value: unknown): value is TrustedRuntimeContext {
 function isGatewayRequest(value: unknown): value is GatewayRequest {
   return (
     isRecord(value) &&
+    Object.keys(value).every((key) =>
+      key === "requestId" || key === "action" || key === "resourceId" || key === "approvalId",
+    ) &&
     isNonEmptyString(value.requestId) &&
     isNonEmptyString(value.action) &&
     isNonEmptyString(value.resourceId) &&
@@ -60,6 +64,7 @@ function isGatewayRequest(value: unknown): value is GatewayRequest {
 function isRegisteredAction(value: string): value is AgentGateAction {
   return (
     value === "resource.read" ||
+    value === "file.read" ||
     value === "deploy.staging" ||
     value === "deploy.production"
   );
@@ -107,6 +112,21 @@ function explanationFor(
   if (reasonCode === "unknown_resource") {
     return "The requested resource is not registered as a protected resource.";
   }
+  if (reasonCode === "unknown_team") {
+    return "The protected file belongs to an unknown team; access is denied.";
+  }
+  if (reasonCode === "team_membership_missing") {
+    return "The acting human has no trusted membership relationship with this team.";
+  }
+  if (reasonCode === "team_role_insufficient") {
+    return "The acting human's trusted team role is below the protected file's minimum role.";
+  }
+  if (reasonCode === "malformed_attributes") {
+    return "The subject, object, action, or environment attributes were malformed.";
+  }
+  if (reasonCode === "action_resource_mismatch") {
+    return "The registered action does not match the protected resource type.";
+  }
   if (reasonCode === "invalid_capability" || reasonCode === "idempotency_mismatch") {
     return "The supplied capability does not exactly match this protected action request.";
   }
@@ -122,6 +142,7 @@ export class RuntimeGateway {
     private readonly audit: AuditService,
     private readonly approvals: ApprovalService,
     private readonly store: JsonStore,
+    private readonly memberships: MembershipResolver = new TeamMembershipService(store),
   ) {}
 
   async execute(
@@ -186,14 +207,20 @@ export class RuntimeGateway {
       };
     }
 
+    // The request cannot supply roles. Resolve relationship tuples from the
+    // trusted server store at the enforcement boundary before policy runs.
+    const memberships = this.memberships.resolveMemberships(context.humanId);
     const decision = await this.policy.evaluate({
-      humanId: context.humanId,
-      agentId: context.agentId,
-      runId: context.runId,
       requestId: request.requestId,
-      action: request.action,
-      resource,
-      environment: environmentFor(request.action),
+      subject: {
+        humanId: context.humanId,
+        agentId: context.agentId,
+        runId: context.runId,
+        memberships,
+      },
+      object: { resource },
+      action: { name: request.action },
+      environment: { name: environmentFor(request.action) },
     });
     await this.recordPolicyDecision(context, request, resource, decision, startedAt);
 
@@ -463,7 +490,7 @@ export class RuntimeGateway {
       runId: context.runId,
       requestId: request.requestId,
       action: isRegisteredAction(request.action) ? request.action : null,
-        resourceId: resource?.id ?? null,
+      resourceId: resource?.id ?? null,
       decision: auditDecisionFor(decision.outcome),
       risk: decision.risk,
       reasonCode: decision.reasonCode,

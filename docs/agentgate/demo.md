@@ -26,6 +26,26 @@ Open `http://localhost:3000` and use the side panel:
 
 The receipt is evidence only: it contains metadata and status, never secrets.
 
+## Optional team-file extension
+
+Keep the core Bouncer story above within three minutes. If a judge asks about
+production team permissions, use a User A Agent and a User B Agent to show:
+
+```bash
+agentctl file read team-alpha-internal
+agentctl file read team-alpha-restricted
+agentctl file read team-beta-internal
+```
+
+- User A is Team Alpha admin and can read the internal and restricted Alpha
+  files.
+- User B is Team Alpha viewer and can read the internal Alpha file but is
+  denied the restricted Alpha file.
+- User A is not a Team Beta member and is denied the Beta file.
+
+The audit timeline should retain the registered file identifier and policy
+reason while never containing the synthetic file payload.
+
 ## Manual real-Codex rehearsal
 
 The browser workflow above uses the configured model. Keep the deterministic

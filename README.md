@@ -29,6 +29,7 @@ Volcengine ECS.
 - Fastify control plane with asynchronous Run state
 - Persistent Agent workspaces and Codex sessions
 - AgentGate identity, ownership, approval, one-use capability, and redacted audit evidence
+- Team-scoped protected file reads with backend-resolved membership and role checks
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -40,7 +41,11 @@ relationship, and only the RuntimeGateway can invoke a registered protected
 action. User A can read `project-a`; User B's resource is denied. Production
 deploy requires owner approval, produces a one-use capability, and leaves a
 redacted audit trail. Owner revocation invalidates the active Run identity and
-its capabilities. See the [AgentGate overview](docs/agentgate/overview.md) and
+its capabilities. A standards-informed extension allows internal team files to
+be shared with viewers while restricted files require a stronger team role;
+the Runtime cannot assert its own membership. See the
+[AgentGate overview](docs/agentgate/overview.md),
+[standards alignment](docs/agentgate/standards.md), and
 [three-minute demo](docs/agentgate/demo.md).
 
 ## Requirements
@@ -294,6 +299,7 @@ docker compose config
 - [Architecture](docs/ARCHITECTURE.md)
 - [AgentGate architecture](docs/agentgate/architecture.md)
 - [AgentGate decisions](docs/agentgate/decisions.md)
+- [AgentGate standards alignment](docs/agentgate/standards.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)

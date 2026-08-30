@@ -44,7 +44,7 @@ export function DelegationReceipt({ agent, approvals, audit }: DelegationReceipt
         <div><dt>Resource</dt><dd>{approval.resourceId}</dd></div>
         <div><dt>Risk</dt><dd>{approval.risk}</dd></div>
         <div><dt>Reason</dt><dd>{pretty(approval.reasonCode)}</dd></div>
-        <div><dt>Policy</dt><dd>{policyEvent?.policyVersion ?? "bouncer-v1"}</dd></div>
+        <div><dt>Policy</dt><dd>{policyEvent?.policyVersion ?? "bouncer-v2"}</dd></div>
         <div><dt>Created</dt><dd>{new Date(approval.createdAt).toLocaleString()}</dd></div>
         <div><dt>Decided</dt><dd>{approval.decidedAt ? new Date(approval.decidedAt).toLocaleString() : "Pending"}</dd></div>
         <div><dt>Expires</dt><dd>{new Date(approval.expiresAt).toLocaleString()}</dd></div>

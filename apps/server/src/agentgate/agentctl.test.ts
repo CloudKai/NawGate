@@ -94,6 +94,23 @@ describe("agentctl", () => {
     expect(result.stdout + result.stderr).not.toContain("TEST_RUNTIME_TOKEN_DO_NOT_PRINT");
   });
 
+  it("adds only the narrow file.read command for protected team files", async () => {
+    const result = await runCli(["file", "read", "team-alpha-internal"], "success");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("AgentGate: file.read team-alpha-internal -> ALLOW");
+    expect(result.received).toHaveLength(1);
+    expect(result.received[0]).toMatchObject({
+      pathname: "/api/runtime/actions",
+      body: { action: "file.read", resourceId: "team-alpha-internal" },
+    });
+  });
+
+  it("does not expose a file write/delete/share/export command", async () => {
+    const result = await runCli(["file", "write", "team-alpha-internal"], "success");
+    expect(result.code).toBe(1);
+    expect(result.received).toHaveLength(0);
+  });
+
   it("polls approval with bounded retries and reuses the request id exactly once", async () => {
     const result = await runCli(["deploy", "production"], "approval");
     expect(result.code).toBe(0);

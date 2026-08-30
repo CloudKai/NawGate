@@ -26,3 +26,11 @@ gateway remain the enforcement authority.
 
 Agent-to-agent delegation remains out of scope for the MVP and is a future
 stretch only.
+
+## Team relationships extend rather than replace ownership
+
+User-owned protected resources retain their hard owner check. Team-owned files
+use a separate relationship-and-attribute path so legitimate collaboration does
+not weaken the original User A/User B isolation proof. The first slice is
+read-only and supports fixed demo team roles; file mutation and enterprise
+group lifecycle remain out of scope.

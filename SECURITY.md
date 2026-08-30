@@ -13,7 +13,10 @@ credentials, personal data, or exploit details in an issue.
 
 - Demo User A/User B identities and backend Agent ownership are implemented for
   the AgentGate proof of concept; this is not production tenant isolation or
-  RBAC.
+  an enterprise IAM system.
+- Team memberships and roles are deterministic demo fixtures reseeded in the
+  local JSON store. There is no production directory, SCIM lifecycle,
+  permission-change consistency protocol, or team-administration surface.
 - AgentGate protects only registered actions routed through `agentctl`; it does
   not intercept every internal Codex shell or file operation.
 - Explicit owner revocation invalidates active Run credentials and pending or

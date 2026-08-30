@@ -33,7 +33,7 @@ const demoSessionBody = z.object({
 }).strict();
 const runtimeActionBody = z.object({
   requestId: z.string().uuid(),
-  action: z.enum(["resource.read", "deploy.staging", "deploy.production"]),
+  action: z.enum(["resource.read", "file.read", "deploy.staging", "deploy.production"]),
   resourceId: z.string().min(1).max(120),
   approvalId: z.string().uuid().optional(),
 }).strict();

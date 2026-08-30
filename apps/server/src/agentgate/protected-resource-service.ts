@@ -11,6 +11,14 @@ const projectProfiles = new Map<string, string>([
   ["project-b", "Synthetic profile for project-b: owner User B."],
 ]);
 
+// Protected file payloads are intentionally server-only. Only the result of
+// a RuntimeGateway-authorized read can cross the resource boundary.
+const teamFiles = new Map<string, string>([
+  ["team-alpha-internal", "Synthetic internal Team Alpha file."],
+  ["team-alpha-restricted", "Synthetic restricted Team Alpha file."],
+  ["team-beta-internal", "Synthetic internal Team Beta file."],
+]);
+
 export class ProtectedResourceError extends Error {}
 
 interface ExecutionContext {
@@ -53,6 +61,21 @@ export class ProtectedResourceService {
       });
       this.recordExecution(action, resourceId);
       return { summary: "Read protected project profile " + resourceId, content };
+    }
+
+    if (action === "file.read") {
+      if (resource.type !== "team_file") {
+        throw new ProtectedResourceError("Protected resource does not support file reads");
+      }
+      const content = teamFiles.get(resourceId);
+      if (!content) {
+        throw new ProtectedResourceError("Protected file content not found");
+      }
+      await this.persistExecution(execution, action, resourceId, {
+        summary: "Read protected team file " + resourceId,
+      });
+      this.recordExecution(action, resourceId);
+      return { summary: "Read protected team file " + resourceId, content };
     }
 
     if (resource.type !== "deployment_target") {

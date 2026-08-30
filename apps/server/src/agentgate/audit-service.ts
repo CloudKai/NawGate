@@ -39,14 +39,15 @@ export class AuditService {
   ) {}
 
   async record(input: AuditEventInput): Promise<AuditEvent> {
-    // Only canonical resource identifiers are useful audit evidence. Never
-    // persist caller-controlled unknown strings (which could contain a
-    // runtime credential or protected payload).
-    const safeResourceId = input.resourceId !== null &&
-      /^(project-[ab]|staging|production)$/.test(input.resourceId)
-      ? input.resourceId
-      : input.resourceId === null
-        ? null
+    // Only identifiers already registered in trusted resource metadata are
+    // useful audit evidence. Never persist caller-controlled unknown strings
+    // (which could contain a runtime credential or protected payload).
+    const safeResourceId = input.resourceId === null
+      ? null
+      : this.store
+          .snapshot()
+          .protectedResources.some((resource) => resource.id === input.resourceId)
+        ? input.resourceId
         : "unknown";
     const event: AuditEvent = {
       id: randomUUID(),

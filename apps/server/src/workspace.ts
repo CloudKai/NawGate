@@ -62,6 +62,8 @@ export class WorkspaceManager {
       "- agentctl resource read <resource-id>",
       "- agentctl deploy staging",
       "- agentctl deploy production",
+      "For protected team files, use only:",
+      "- agentctl file read <resource-id>",
       "",
       "A protected action may be denied or may wait for explicit owner approval. Respect the result. Never print credentials or environment variables.",
       "",

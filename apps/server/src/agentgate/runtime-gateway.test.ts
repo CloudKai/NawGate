@@ -26,6 +26,7 @@ async function makeGateway(): Promise<{
   resources: ProtectedResourceService;
   approvals: ApprovalService;
   audit: AuditService;
+  store: JsonStore;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), "agentgate-gateway-test-"));
   temporaryDirectories.push(root);
@@ -38,6 +39,7 @@ async function makeGateway(): Promise<{
     resources,
     approvals,
     audit,
+    store,
     gateway: new RuntimeGateway(
       new DeterministicPolicyEngine(),
       resources,
@@ -87,6 +89,72 @@ describe("RuntimeGateway", () => {
       resourceId: "not-registered",
     });
     expect(unknown).toMatchObject({ status: "denied", reasonCode: "unknown_resource" });
+  });
+
+  it("enforces server-resolved team membership and role at the protected file boundary", async () => {
+    const { gateway, resources, audit, store } = await makeGateway();
+    const alphaAsAdmin = await gateway.execute(context, {
+      requestId: "request-alpha-admin",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+    });
+    expect(alphaAsAdmin).toMatchObject({ status: "success", action: "file.read" });
+    if (alphaAsAdmin.status === "success") {
+      expect(alphaAsAdmin.result.content).toContain("Team Alpha");
+    }
+
+    const alphaAsViewer = await gateway.execute(
+      { humanId: "user-b", agentId: "agent-b", runId: "run-b" },
+      {
+        requestId: "request-alpha-viewer",
+        action: "file.read",
+        resourceId: "team-alpha-internal",
+      },
+    );
+    expect(alphaAsViewer).toMatchObject({ status: "success" });
+
+    const restricted = await gateway.execute(
+      { humanId: "user-b", agentId: "agent-b", runId: "run-b" },
+      {
+        requestId: "request-alpha-restricted",
+        action: "file.read",
+        resourceId: "team-alpha-restricted",
+      },
+    );
+    expect(restricted).toMatchObject({ status: "denied", reasonCode: "team_role_insufficient" });
+
+    const wrongTeam = await gateway.execute(context, {
+      requestId: "request-beta-wrong-team",
+      action: "file.read",
+      resourceId: "team-beta-internal",
+    });
+    expect(wrongTeam).toMatchObject({ status: "denied", reasonCode: "team_membership_missing" });
+    expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(2);
+    expect(resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(0);
+    expect(resources.getExecutionCount("file.read", "team-beta-internal")).toBe(0);
+    expect(audit.list("agent-a")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "policy.allow",
+          resourceId: "team-alpha-internal",
+          policyVersion: "bouncer-v2",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(audit.list("agent-a"))).not.toContain("Synthetic internal Team Alpha file");
+    expect(JSON.stringify(store.snapshot())).not.toContain("Synthetic internal Team Alpha file");
+  });
+
+  it("does not accept membership attributes supplied in the runtime request", async () => {
+    const { gateway, resources } = await makeGateway();
+    const forged = await gateway.execute(context, {
+      requestId: "request-forged-membership",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+      memberships: [{ teamId: "team-alpha", humanId: "user-a", role: "admin" }],
+    } as never);
+    expect(forged).toMatchObject({ status: "denied", reasonCode: "invalid_context" });
+    expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
   });
 
   it("does not deploy production before approval", async () => {

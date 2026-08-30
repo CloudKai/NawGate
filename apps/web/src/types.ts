@@ -66,7 +66,7 @@ export interface ApprovalRecord {
   agentId: string;
   runId: string;
   requestId: string;
-  action: "resource.read" | "deploy.staging" | "deploy.production";
+  action: "resource.read" | "file.read" | "deploy.staging" | "deploy.production";
   resourceId: string;
   risk: "high";
   reasonCode: string;
@@ -84,7 +84,7 @@ export interface AuditEvent {
   agentId: string | null;
   runId: string | null;
   requestId: string | null;
-  action: "resource.read" | "deploy.staging" | "deploy.production" | null;
+  action: "resource.read" | "file.read" | "deploy.staging" | "deploy.production" | null;
   resourceId: string | null;
   decision: "allow" | "deny" | "require_approval" | null;
   risk: "low" | "medium" | "high" | null;

@@ -38,6 +38,7 @@ describe("WorkspaceManager", () => {
     const instructions = await readFile(path.join(agent.workspacePath, "AGENTS.md"), "utf8");
     expect(instructions).toContain("## AgentGate protected actions");
     expect(instructions).toContain("agentctl resource read <resource-id>");
+    expect(instructions).toContain("agentctl file read <resource-id>");
     expect(instructions).toContain("agentctl deploy production");
     expect(instructions).toContain("Never print credentials or environment variables.");
   });

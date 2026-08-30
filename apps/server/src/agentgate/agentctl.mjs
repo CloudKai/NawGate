@@ -14,7 +14,7 @@ const maxWaitMs = Number.isFinite(configuredWait) && configuredWait > 0
 
 function usage() {
   process.stderr.write(
-    "Usage: agentctl resource read <resource-id> | agentctl deploy <staging|production>\n",
+    "Usage: agentctl resource read <resource-id> | agentctl file read <resource-id> | agentctl deploy <staging|production>\n",
   );
 }
 
@@ -26,6 +26,9 @@ function fail(message) {
 function parseCommand(args) {
   if (args.length === 3 && args[0] === "resource" && args[1] === "read") {
     return { action: "resource.read", resourceId: args[2], label: "resource.read " + args[2] };
+  }
+  if (args.length === 3 && args[0] === "file" && args[1] === "read") {
+    return { action: "file.read", resourceId: args[2], label: "file.read " + args[2] };
   }
   if (args.length === 2 && args[0] === "deploy" && args[1] === "staging") {
     return { action: "deploy.staging", resourceId: "staging", label: "deploy.staging" };

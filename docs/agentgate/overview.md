@@ -19,8 +19,11 @@ that can execute a protected side effect.
 - Replays with a new request ID, expired approvals, invalid capabilities, and
   revoked Run authority fail closed without executing the protected action.
 - Every decision is redacted audit evidence. Policy decisions carry the
-  central version `bouncer-v1`, a reason explanation, and `RuntimeGateway` as
+  central version `bouncer-v2`, a reason explanation, and `RuntimeGateway` as
   the enforcement point.
+- Protected team files use backend-resolved membership relationships and role
+  thresholds. Internal files may be shared with team viewers, while restricted
+  files require an elevated team role and non-members fail closed.
 
 The Delegation Receipt in the Web UI is a safe summary of the human, Agent,
 Run, action, resource, risk, reason, policy version, timestamps, expiry, uses,
@@ -33,6 +36,11 @@ AgentGate protects registered actions routed through `agentctl`. It does not
 intercept every internal Codex shell command or file operation inside a Run.
 The disposable Runtime container is the demo boundary; this is not a claim of
 hardened multi-tenant isolation.
+
+The standards lineage and deliberate production limits are documented in
+[`standards.md`](standards.md). Team-file authorization is a focused extension
+of the Bouncer story, not a claim that the POC is a complete enterprise IAM
+system.
 
 ## Verification
 

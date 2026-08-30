@@ -1,7 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEMO_PROTECTED_RESOURCES, isHumanId } from "./agentgate/demo-users.js";
-import type { DeploymentState } from "./agentgate/types.js";
+import {
+  DEMO_PROTECTED_RESOURCES,
+  DEMO_TEAM_MEMBERSHIPS,
+  isHumanId,
+  isTeamId,
+  isTeamRole,
+} from "./agentgate/demo-users.js";
+import type { DeploymentState, TeamMembership } from "./agentgate/types.js";
 import type { Database } from "./types.js";
 
 const deploymentFixtures: readonly DeploymentState[] = [
@@ -22,7 +28,7 @@ const deploymentFixtures: readonly DeploymentState[] = [
 ];
 
 const emptyDatabase = (): Database => seedDatabase({
-  version: 2,
+  version: 3,
   agents: [],
   messages: [],
   runs: [],
@@ -31,6 +37,7 @@ const emptyDatabase = (): Database => seedDatabase({
   protectedResources: [],
   deploymentStates: [],
   actionExecutions: [],
+  teamMemberships: [],
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -48,7 +55,29 @@ function seedDatabase(database: Database): Database {
       database.deploymentStates.push(structuredClone(state));
     }
   }
+  for (const membership of DEMO_TEAM_MEMBERSHIPS) {
+    if (
+      !database.teamMemberships.some(
+        (item) =>
+          item.teamId === membership.teamId && item.humanId === membership.humanId,
+      )
+    ) {
+      database.teamMemberships.push(structuredClone(membership));
+    }
+  }
   return database;
+}
+
+function isTeamMembership(value: unknown): value is TeamMembership {
+  return (
+    isRecord(value) &&
+    typeof value.teamId === "string" &&
+    isTeamId(value.teamId) &&
+    typeof value.humanId === "string" &&
+    isHumanId(value.humanId) &&
+    typeof value.role === "string" &&
+    isTeamRole(value.role)
+  );
 }
 
 export function migrateDatabase(value: unknown): Database {
@@ -61,7 +90,7 @@ export function migrateDatabase(value: unknown): Database {
       throw new Error("Unsupported database format");
     }
     return seedDatabase({
-      version: 2,
+      version: 3,
       agents: value.agents.map((agent) => ({
         ...(agent as object),
         ownerUserId: "user-a",
@@ -73,11 +102,42 @@ export function migrateDatabase(value: unknown): Database {
       protectedResources: [],
       deploymentStates: [],
       actionExecutions: [],
+      teamMemberships: [],
+    });
+  }
+
+  if (value.version === 2) {
+    if (
+      !value.agents.every(
+        (agent) =>
+          isRecord(agent) &&
+          typeof agent.ownerUserId === "string" &&
+          isHumanId(agent.ownerUserId),
+      ) ||
+      !Array.isArray(value.approvals) ||
+      !Array.isArray(value.auditEvents) ||
+      !Array.isArray(value.protectedResources) ||
+      !Array.isArray(value.deploymentStates) ||
+      !Array.isArray(value.actionExecutions)
+    ) {
+      throw new Error("Unsupported database format");
+    }
+    return seedDatabase({
+      version: 3,
+      agents: value.agents as Database["agents"],
+      messages: value.messages as Database["messages"],
+      runs: value.runs as Database["runs"],
+      approvals: value.approvals as Database["approvals"],
+      auditEvents: value.auditEvents as Database["auditEvents"],
+      protectedResources: value.protectedResources as Database["protectedResources"],
+      deploymentStates: value.deploymentStates as Database["deploymentStates"],
+      actionExecutions: value.actionExecutions as Database["actionExecutions"],
+      teamMemberships: [],
     });
   }
 
   if (
-    value.version !== 2 ||
+    value.version !== 3 ||
     !value.agents.every(
       (agent) =>
         isRecord(agent) &&
@@ -88,7 +148,9 @@ export function migrateDatabase(value: unknown): Database {
     !Array.isArray(value.auditEvents) ||
     !Array.isArray(value.protectedResources) ||
     !Array.isArray(value.deploymentStates) ||
-    !Array.isArray(value.actionExecutions)
+    !Array.isArray(value.actionExecutions) ||
+    !Array.isArray(value.teamMemberships) ||
+    !value.teamMemberships.every(isTeamMembership)
   ) {
     throw new Error("Unsupported database format");
   }

@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates v1 data to v2 without dropping starter records", async () => {
+  it("migrates v1 data to v3 and seeds team relationships without dropping starter records", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -47,19 +47,55 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(2);
+    expect(database.version).toBe(3);
     expect(database.agents[0]?.ownerUserId).toBe("user-a");
     expect(database.protectedResources.map((resource) => resource.id)).toEqual([
       "project-a",
       "project-b",
       "staging",
       "production",
+      "team-alpha-internal",
+      "team-alpha-restricted",
+      "team-beta-internal",
     ]);
     expect(database.deploymentStates.map((state) => state.resourceId)).toEqual([
       "staging",
       "production",
     ]);
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 2 });
+    expect(database.teamMemberships).toEqual([
+      { teamId: "team-alpha", humanId: "user-a", role: "admin" },
+      { teamId: "team-alpha", humanId: "user-b", role: "viewer" },
+      { teamId: "team-beta", humanId: "user-b", role: "editor" },
+    ]);
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 3 });
+  });
+
+  it("migrates an existing v2 database and adds only missing team fixtures", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v2-test-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(filePath, JSON.stringify({
+      version: 2,
+      agents: [],
+      messages: [],
+      runs: [],
+      approvals: [],
+      auditEvents: [],
+      protectedResources: [],
+      deploymentStates: [],
+      actionExecutions: [],
+    }), "utf8");
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot().version).toBe(3);
+    expect(store.snapshot().teamMemberships).toHaveLength(3);
+    expect(store.snapshot().protectedResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "team-alpha-internal", type: "team_file" }),
+      ]),
+    );
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
