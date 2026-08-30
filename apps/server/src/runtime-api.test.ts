@@ -44,7 +44,9 @@ afterEach(async () => {
   );
 });
 
-async function makeRuntimeApp(): Promise<{
+async function makeRuntimeApp(
+  options: { securityLabEnabled?: boolean } = {},
+): Promise<{
   app: Awaited<ReturnType<typeof createApp>>;
   runtime: RuntimeApiDependencies;
   resources: ProtectedResourceService;
@@ -113,7 +115,7 @@ async function makeRuntimeApp(): Promise<{
     loadConfig({
       NODE_ENV: "test",
       APP_AUTH_TOKEN: "outer-token-for-tests",
-      AGENTGATE_SECURITY_LAB_ENABLED: "true",
+      AGENTGATE_SECURITY_LAB_ENABLED: options.securityLabEnabled === false ? "false" : "true",
     }),
     service,
     undefined,
@@ -128,6 +130,29 @@ function runtimeHeaders(token: string) {
 }
 
 describe("Runtime API boundary", () => {
+  it("does not register Security Lab endpoints unless explicitly enabled", async () => {
+    const { app } = await makeRuntimeApp({ securityLabEnabled: false });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/security-lab`,
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-agentgate-session": sessionToken,
+      },
+      payload: { scenario: "own-project" },
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it("runs Security Lab scenarios through the real gateway and returns safe evidence", async () => {
     const { app, resources } = await makeRuntimeApp();
     const ownProject = await app.inject({
@@ -430,6 +455,41 @@ describe("Runtime API boundary", () => {
     expect(retried.statusCode).toBe(200);
     expect(retried.json()).toMatchObject({ status: "success" });
     expect(resources.getDeploymentState("production", "production")?.deploymentCount).toBe(1);
+  });
+
+  it("does not disclose an approval to a different Run or Agent credential", async () => {
+    const { app, runtime } = await makeRuntimeApp();
+    const bound = runtime.credentials.issue(agentAId, "run-approval-bound", "user-a");
+    const initial = await app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: runtimeHeaders(bound.token),
+      payload: {
+        requestId: "0ca49601-77ee-4e0a-bfd7-d5f85dce9e94",
+        action: "deploy.production",
+        resourceId: "production",
+      },
+    });
+    expect(initial.statusCode).toBe(202);
+    const approvalId = (initial.json() as { approvalId: string }).approvalId;
+
+    const otherRun = runtime.credentials.issue(agentAId, "run-approval-other", "user-a");
+    const hiddenFromRun = await app.inject({
+      method: "GET",
+      url: "/api/runtime/approvals/" + approvalId,
+      headers: runtimeHeaders(otherRun.token),
+    });
+    expect(hiddenFromRun.statusCode).toBe(404);
+    expect(hiddenFromRun.json()).toEqual({ status: "denied", code: "APPROVAL_DENIED" });
+
+    const otherAgent = runtime.credentials.issue(agentBId, "run-approval-agent-b", "user-b");
+    const hiddenFromAgent = await app.inject({
+      method: "GET",
+      url: "/api/runtime/approvals/" + approvalId,
+      headers: runtimeHeaders(otherAgent.token),
+    });
+    expect(hiddenFromAgent.statusCode).toBe(404);
+    expect(hiddenFromAgent.json()).toEqual({ status: "denied", code: "APPROVAL_DENIED" });
   });
 
   it("rejects identity fields in runtime action bodies", async () => {

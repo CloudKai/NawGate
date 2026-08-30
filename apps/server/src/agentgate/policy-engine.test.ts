@@ -118,7 +118,13 @@ describe("DeterministicPolicyEngine", () => {
     ]))).resolves.toMatchObject({ outcome: "allow", reasonCode: "team_file_read" });
   });
 
-  it("denies a viewer from restricted Alpha and denies an absent Beta relationship", async () => {
+  it("allows an editor to read restricted Alpha, but denies a viewer and an absent Beta relationship", async () => {
+    await expect(policy.evaluate(input("user-a", alphaRestricted, "file.read", [
+      { teamId: "team-alpha", humanId: "user-a", role: "admin" },
+    ], "local", [{ ...alphaGrant, role: "editor" }]))).resolves.toMatchObject({
+      outcome: "allow",
+      reasonCode: "team_file_read",
+    });
     await expect(policy.evaluate(input("user-b", alphaRestricted, "file.read", [
       { teamId: "team-alpha", humanId: "user-b", role: "viewer" },
     ]))).resolves.toMatchObject({ outcome: "deny", reasonCode: "team_role_insufficient" });
