@@ -11,7 +11,13 @@ credentials, personal data, or exploit details in an issue.
 
 ## Known limitations
 
-- Shared demo token; no user identity, authorization, RBAC, or tenant isolation
+- Demo User A/User B identities and backend Agent ownership are implemented for
+  the AgentGate proof of concept; this is not production tenant isolation or
+  RBAC.
+- AgentGate protects only registered actions routed through `agentctl`; it does
+  not intercept every internal Codex shell or file operation.
+- Runtime credential redaction is exact-token best effort; use the disposable
+  container Runtime for protected-action demonstrations.
 - No CSRF protection
 - No per-Agent container boundary in ECS mode
 - Ordinary local containers, not hardened multi-tenant sandboxes

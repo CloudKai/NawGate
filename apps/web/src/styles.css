@@ -340,6 +340,29 @@ button {
   text-overflow: ellipsis;
 }
 
+.actor-switch {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid #3d3d38;
+  border-radius: 12px;
+  background: #292925;
+  color: #a7a69e;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.actor-switch select {
+  min-height: 34px;
+  border: 1px solid #4a4943;
+  border-radius: 8px;
+  padding: 0 9px;
+  color: #f5f3ed;
+  background: #242421;
+  font-size: 11px;
+}
+
 .eyebrow {
   color: #898982;
   font-size: 9px;
@@ -854,6 +877,218 @@ textarea:focus {
   font-size: 8px;
 }
 
+.agentgate-panel {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  background: rgba(251, 250, 247, 0.86);
+  box-shadow: 0 12px 30px rgba(39, 38, 33, 0.05);
+}
+
+.agentgate-panel-heading,
+.agentgate-section-title,
+.approval-card-topline,
+.audit-event-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agentgate-panel-heading {
+  margin-bottom: 18px;
+}
+
+.agentgate-panel-heading h2 {
+  margin: 4px 0 0;
+  font-size: 17px;
+}
+
+.owner-chip,
+.risk-badge {
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.owner-chip {
+  color: #5745b4;
+  background: var(--purple-soft);
+}
+
+.agentgate-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(280px, 1.1fr);
+  gap: 22px;
+}
+
+.agentgate-section-title {
+  margin-bottom: 10px;
+  color: #4c4d47;
+  font-size: 11px;
+}
+
+.agentgate-section-title > span {
+  color: #96968f;
+  font-size: 9px;
+}
+
+.agentgate-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.approval-card {
+  border: 1px solid #e0dcef;
+  border-radius: 11px;
+  padding: 13px;
+  background: #f8f6ff;
+}
+
+.approval-card + .approval-card {
+  margin-top: 9px;
+}
+
+.approval-card-topline {
+  margin-bottom: 10px;
+  color: #9994a8;
+  font-size: 9px;
+}
+
+.risk-badge {
+  color: #a34343;
+  background: #f8e7e4;
+}
+
+.approval-card > strong {
+  color: #49398f;
+  font-size: 12px;
+}
+
+.approval-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 13px 0 9px;
+}
+
+.approval-details div {
+  min-width: 0;
+}
+
+.approval-details dt {
+  color: #9a97a5;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.approval-details dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #55515f;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-card > p {
+  margin: 0 0 12px;
+  color: #78737f;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.approval-actions .button {
+  min-height: 32px;
+  font-size: 10px;
+}
+
+.audit-timeline {
+  position: relative;
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-event {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 9px;
+  padding: 0 0 14px;
+}
+
+.audit-event:not(:last-child)::before {
+  position: absolute;
+  top: 11px;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: #dedbd2;
+  content: "";
+}
+
+.audit-event-dot {
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin-top: 2px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: #aaa9a2;
+  box-shadow: 0 0 0 1px #d6d4cd;
+}
+
+.audit-dot-success {
+  background: var(--green);
+}
+
+.audit-dot-pending {
+  background: var(--purple);
+}
+
+.audit-dot-failure {
+  background: var(--red);
+}
+
+.audit-event-copy {
+  min-width: 0;
+}
+
+.audit-event-heading strong {
+  overflow: hidden;
+  color: #4b4c46;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-event-heading time,
+.audit-event-copy > span {
+  color: #999890;
+  font-size: 9px;
+}
+
+.audit-event-copy > span {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .send-button {
   width: 32px;
   height: 32px;
@@ -1086,6 +1321,14 @@ textarea:focus {
 
   .messages {
     padding: 22px 15px;
+  }
+
+  .agentgate-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agentgate-panel {
+    padding: 15px;
   }
 
   .message-user {

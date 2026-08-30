@@ -23,6 +23,9 @@ RUN if [ -n "$DEBIAN_SECURITY_MIRROR" ]; then \
     && codex --version \
     && rm -rf /var/lib/apt/lists/*
 
+COPY apps/server/src/agentgate/agentctl.mjs /usr/local/bin/agentctl
+RUN chmod 0755 /usr/local/bin/agentctl
+
 ENV CODEX_HOME=/codex-home
 ENV HOME=/tmp
 ENV NO_COLOR=1

@@ -1,0 +1,409 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "AgentGate Protected Action Workflow",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": "agentgate-codejam.workflow.html",
+    "viewBox": [
+      880,
+      900
+    ],
+    "views": [
+      {
+        "id": "happy",
+        "label": "Allowed own resource",
+        "focus": [
+          "user",
+          "agent",
+          "verify",
+          "policy",
+          "allow",
+          "resource",
+          "audit_allow"
+        ],
+        "note": "Low-risk own-resource action executes automatically."
+      },
+      {
+        "id": "deny",
+        "label": "Cross-user denial",
+        "focus": [
+          "agent",
+          "verify",
+          "policy",
+          "deny",
+          "unchanged",
+          "audit_deny"
+        ],
+        "note": "Hard deny happens before any protected resource execution."
+      },
+      {
+        "id": "approval",
+        "label": "Production approval",
+        "focus": [
+          "agent",
+          "verify",
+          "policy",
+          "pending",
+          "human_approve",
+          "lease",
+          "retry",
+          "production",
+          "audit_success"
+        ],
+        "note": "High-risk action needs exact one-use owner approval."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "human",
+      "label": "Human"
+    },
+    {
+      "id": "agentlane",
+      "label": "Codex Runtime"
+    },
+    {
+      "id": "gate",
+      "label": "AgentGate"
+    },
+    {
+      "id": "policylane",
+      "label": "Policy / Approval"
+    },
+    {
+      "id": "resource_lane",
+      "label": "Protected Resource"
+    },
+    {
+      "id": "audit_lane",
+      "label": "Audit"
+    },
+    {
+      "id": "exception",
+      "label": "Denied / Expired",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "identify",
+      "label": "Identify",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "decide",
+      "label": "Decide",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "execute",
+      "label": "Execute or stop",
+      "fromCol": 4,
+      "toCol": 7,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "user",
+    "agent",
+    "verify",
+    "policy",
+    "allow",
+    "resource",
+    "audit_allow"
+  ],
+  "nodes": [
+    {
+      "id": "user",
+      "lane": "human",
+      "col": 0,
+      "type": "external",
+      "label": "User A",
+      "sublabel": "requests protected action"
+    },
+    {
+      "id": "agent",
+      "lane": "agentlane",
+      "col": 1,
+      "type": "backend",
+      "label": "agentctl",
+      "sublabel": "typed action + requestId"
+    },
+    {
+      "id": "verify",
+      "lane": "gate",
+      "col": 2,
+      "type": "security",
+      "label": "Verify Run Credential",
+      "sublabel": "derive owner/Agent/Run"
+    },
+    {
+      "id": "policy",
+      "lane": "policylane",
+      "col": 3,
+      "type": "security",
+      "label": "Evaluate Policy",
+      "sublabel": "deterministic PDP"
+    },
+    {
+      "id": "allow",
+      "lane": "gate",
+      "col": 4,
+      "type": "security",
+      "label": "ALLOW",
+      "sublabel": "owned low-risk action"
+    },
+    {
+      "id": "resource",
+      "lane": "resource_lane",
+      "col": 5,
+      "type": "database",
+      "label": "Execute Resource",
+      "sublabel": "one protected side effect"
+    },
+    {
+      "id": "audit_allow",
+      "lane": "audit_lane",
+      "col": 6,
+      "type": "database",
+      "label": "Audit Success",
+      "sublabel": "human + Agent + Run + decision"
+    },
+    {
+      "id": "deny",
+      "lane": "exception",
+      "col": 4,
+      "type": "security",
+      "label": "DENY",
+      "sublabel": "owner mismatch / invalid"
+    },
+    {
+      "id": "unchanged",
+      "lane": "resource_lane",
+      "col": 6,
+      "type": "database",
+      "label": "Asset Unchanged",
+      "sublabel": "no disclosure / no side effect"
+    },
+    {
+      "id": "audit_deny",
+      "lane": "audit_lane",
+      "col": 7,
+      "type": "database",
+      "label": "Audit Deny",
+      "sublabel": "stable reason code"
+    },
+    {
+      "id": "pending",
+      "lane": "policylane",
+      "col": 4,
+      "type": "security",
+      "label": "Approval Required",
+      "sublabel": "production risk"
+    },
+    {
+      "id": "human_approve",
+      "lane": "human",
+      "col": 5,
+      "type": "external",
+      "label": "Approve Once",
+      "sublabel": "owner-only consent"
+    },
+    {
+      "id": "lease",
+      "lane": "policylane",
+      "col": 5,
+      "type": "security",
+      "label": "Capability Lease",
+      "sublabel": "short TTL + one use"
+    },
+    {
+      "id": "retry",
+      "lane": "agentlane",
+      "col": 6,
+      "type": "messagebus",
+      "label": "Retry Same Request",
+      "sublabel": "same requestId"
+    },
+    {
+      "id": "production",
+      "lane": "resource_lane",
+      "col": 7,
+      "type": "cloud",
+      "label": "Production Action",
+      "sublabel": "simulated deployment"
+    },
+    {
+      "id": "audit_success",
+      "lane": "audit_lane",
+      "col": 7,
+      "type": "database",
+      "label": "Audit Approval + Success",
+      "sublabel": "capability consumed"
+    },
+    {
+      "id": "expired",
+      "lane": "exception",
+      "col": 6,
+      "type": "security",
+      "label": "Expired / Denied",
+      "sublabel": "fail closed"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "user",
+      "to": "agent",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e2",
+      "from": "agent",
+      "to": "verify",
+      "variant": "security"
+    },
+    {
+      "id": "e3",
+      "from": "verify",
+      "to": "policy",
+      "variant": "security"
+    },
+    {
+      "id": "e4",
+      "from": "policy",
+      "to": "allow",
+      "label": "owned + low risk",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e5",
+      "from": "allow",
+      "to": "resource",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e6",
+      "from": "resource",
+      "to": "audit_allow",
+      "variant": "dashed"
+    },
+    {
+      "id": "e7",
+      "from": "policy",
+      "to": "deny",
+      "label": "hard deny",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "drop"
+    },
+    {
+      "id": "e8",
+      "from": "deny",
+      "to": "unchanged",
+      "variant": "security"
+    },
+    {
+      "id": "e9",
+      "from": "deny",
+      "to": "audit_deny",
+      "variant": "dashed"
+    },
+    {
+      "id": "e10",
+      "from": "policy",
+      "to": "pending",
+      "label": "high risk",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "drop"
+    },
+    {
+      "id": "e11",
+      "from": "pending",
+      "to": "human_approve",
+      "label": "request consent",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "route": "return-left"
+    },
+    {
+      "id": "e12",
+      "from": "human_approve",
+      "to": "lease",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "drop"
+    },
+    {
+      "id": "e13",
+      "from": "lease",
+      "to": "retry",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e14",
+      "from": "retry",
+      "to": "production",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e15",
+      "from": "production",
+      "to": "audit_success",
+      "variant": "dashed"
+    },
+    {
+      "id": "e16",
+      "from": "lease",
+      "to": "expired",
+      "label": "expired / consumed",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "drop"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Success",
+      "items": [
+        "Identity from Run credential",
+        "Low-risk owned resource auto-allowed",
+        "Decision auditable"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Failure",
+      "items": [
+        "Cross-user is hard deny",
+        "Protected service not called",
+        "Approval cannot override"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "High risk",
+      "items": [
+        "Owner explicitly approves",
+        "Lease exact/short/one-use",
+        "Retry idempotent"
+      ]
+    }
+  ]
+}

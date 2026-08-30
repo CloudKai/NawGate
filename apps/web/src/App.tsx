@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
-import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import { AgentGatePanel } from "./components/agentgate/AgentGatePanel";
+import { DemoActorSwitch } from "./components/agentgate/DemoActorSwitch";
+import type {
+  Agent,
+  AgentRun,
+  ApprovalRecord,
+  AuditEvent,
+  HumanId,
+  HumanPrincipal,
+  Message,
+  SystemInfo,
+} from "./types";
 
 const starterPrompts = [
   "Create a small TypeScript CLI that prints a weather summary from sample JSON.",
@@ -45,6 +56,10 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [actor, setActor] = useState<HumanPrincipal | null>(null);
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
@@ -60,9 +75,10 @@ export default function App() {
     [agents, selectedId],
   );
 
-  const refreshAgents = useCallback(async () => {
+  const refreshAgents = useCallback(async (selectFirst = true) => {
     const { agents: next } = await api.listAgents();
     setAgents(next);
+    if (!selectFirst) return;
     setSelectedId((current) =>
       current && next.some((agent) => agent.id === current)
         ? current
@@ -77,7 +93,20 @@ export default function App() {
     }
   }, []);
 
+  const refreshGate = useCallback(async (agentId: string) => {
+    const [approvalResult, auditResult] = await Promise.all([
+      api.approvals(agentId),
+      api.audit(agentId),
+    ]);
+    if (mountedRef.current && selectedIdRef.current === agentId) {
+      setApprovals(approvalResult.approvals);
+      setAudit(auditResult.audit);
+    }
+  }, []);
+
   const bootstrap = useCallback(async () => {
+    const session = await api.demoSession("user-a");
+    setActor(session.user);
     await Promise.all([refreshAgents(), api.system().then(setSystem)]);
   }, [refreshAgents]);
 
@@ -99,11 +128,13 @@ export default function App() {
   useEffect(() => {
     setActiveRun(null);
     setShowSettings(false);
+    setApprovals([]);
+    setAudit([]);
     if (!selectedId) {
       setMessages([]);
       return;
     }
-    void Promise.all([refreshMessages(selectedId), api.runs(selectedId)])
+    void Promise.all([refreshMessages(selectedId), api.runs(selectedId), refreshGate(selectedId)])
       .then(([, result]) => {
         if (selectedIdRef.current !== selectedId) return;
         const latest = result.runs[0] ?? null;
@@ -117,7 +148,7 @@ export default function App() {
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : String(reason)),
       );
-  }, [refreshMessages, selectedId]);
+  }, [refreshGate, refreshMessages, selectedId]);
 
   useEffect(() => {
     if (selected) {
@@ -209,14 +240,50 @@ export default function App() {
         await new Promise((resolve) => window.setTimeout(resolve, 900));
         if (!mountedRef.current) return;
         const result = await api.run(runId);
+        await refreshGate(agentId);
         if (selectedIdRef.current === agentId) setActiveRun(result.run);
         if (!["queued", "running"].includes(result.run.status)) {
-          await Promise.all([refreshMessages(agentId), refreshAgents()]);
+          await Promise.all([refreshMessages(agentId), refreshAgents(), refreshGate(agentId)]);
           return;
         }
       }
     } finally {
       pollingRunIds.current.delete(runId);
+    }
+  };
+
+  const switchActor = async (userId: HumanId) => {
+    if (actor?.id === userId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await api.demoSession(userId);
+      setActor(session.user);
+      setSelectedId(null);
+      setMessages([]);
+      setActiveRun(null);
+      setApprovals([]);
+      setAudit([]);
+      await refreshAgents(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const decideApproval = async (approvalId: string, decision: "approve" | "deny") => {
+    if (!selected) return;
+    setApprovalBusyId(approvalId);
+    setError(null);
+    try {
+      if (decision === "approve") await api.approve(approvalId);
+      else await api.deny(approvalId);
+      await refreshGate(selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setApprovalBusyId(null);
     }
   };
 
@@ -321,6 +388,8 @@ export default function App() {
           </div>
         </div>
 
+        <DemoActorSwitch actor={actor} disabled={busy} onSwitch={switchActor} />
+
         <button
           className="button button-primary create-button"
           onClick={() => {
@@ -362,21 +431,21 @@ export default function App() {
           <span className="eyebrow">Runtime</span>
           <strong>{system?.runtime ?? "Checking…"}</strong>
           <span>
-            {system?.arkModel ?? "Ark model not configured"}
+            {system?.modelName ?? "Model provider not configured"}
             {system?.containerEngine ? " · " + system.containerEngine : ""}
           </span>
         </div>
       </aside>
 
       <main className="main">
-        {!system?.arkConfigured || !system?.codexAvailable ? (
+        {!system?.modelConfigured || !system?.codexAvailable ? (
           <div className="config-banner">
             <span>!</span>
             <div>
               <strong>Runtime configuration needed</strong>
               <p>
-                {!system?.arkConfigured
-                  ? "Set ARK_API_KEY and ARK_MODEL in .env before using the Playground."
+                {!system?.modelConfigured
+                  ? "Set the selected model provider key and model in .env before using the Playground."
                   : system.runtimeProvider === "container"
                     ? "The local container engine or Agent Runtime image is unavailable. Rerun npm run poc."
                     : "Codex CLI was not found. Use the Docker image or install @openai/codex."}
@@ -528,7 +597,9 @@ export default function App() {
                     </div>
                     <div className="thinking-row">
                       <Spinner />
-                      Codex is reading, editing, or running commands…
+                      {approvals.length > 0
+                        ? "AgentGate is waiting for owner approval…"
+                        : "Codex is reading, editing, or running commands…"}
                     </div>
                   </article>
                 )}
@@ -582,6 +653,15 @@ export default function App() {
                 </div>
               </form>
             </section>
+
+            <AgentGatePanel
+              agent={selected}
+              approvals={approvals}
+              audit={audit}
+              busyApprovalId={approvalBusyId}
+              onApprove={(approvalId) => void decideApproval(approvalId, "approve")}
+              onDeny={(approvalId) => void decideApproval(approvalId, "deny")}
+            />
           </>
         ) : (
           <div className="no-agent">

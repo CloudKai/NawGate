@@ -1,9 +1,19 @@
+import type {
+  ActionExecutionRecord,
+  ApprovalRecord,
+  AuditEvent,
+  DeploymentState,
+  HumanId,
+  ProtectedResource,
+} from "./agentgate/types.js";
+
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type MessageRole = "user" | "assistant";
 
 export interface Agent {
   id: string;
+  ownerUserId: HumanId;
   name: string;
   description: string;
   instructions: string;
@@ -44,10 +54,15 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 1;
+  version: 2;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
+  approvals: ApprovalRecord[];
+  auditEvents: AuditEvent[];
+  protectedResources: ProtectedResource[];
+  deploymentStates: DeploymentState[];
+  actionExecutions: ActionExecutionRecord[];
 }
 
 export interface CreateAgentInput {
@@ -68,11 +83,20 @@ export interface RunnerResult {
   usage: RunUsage | null;
 }
 
+export interface RunnerRuntimeEnvironment {
+  token: string;
+  gatewayUrl: string;
+  approvalWaitMs: number;
+}
+
 export interface RunnerRequest {
   agentId: string;
+  ownerUserId: HumanId;
+  runId: string;
   workspacePath: string;
   prompt: string;
   threadId: string | null;
+  runtime?: RunnerRuntimeEnvironment;
 }
 
 export interface AgentRunner {

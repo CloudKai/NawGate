@@ -1,5 +1,12 @@
 import path from "node:path";
 import { AgentService } from "./agent-service.js";
+import { ApprovalService } from "./agentgate/approval-service.js";
+import { AuditService } from "./agentgate/audit-service.js";
+import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
+import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
+import { IdentityService } from "./agentgate/identity-service.js";
+import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
+import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
 import { createRunner } from "./runner-factory.js";
@@ -11,11 +18,28 @@ await writeCodexConfig(config);
 
 const store = new JsonStore(path.join(config.dataDirectory, "launchpad.json"));
 const workspaces = new WorkspaceManager(config.workspaceRoot);
-const runner = createRunner(config);
+const audit = new AuditService(store);
+const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
+const approvals = new ApprovalService(store, audit);
+const resources = new ProtectedResourceService(store);
+const gateway = new RuntimeGateway(
+  new DeterministicPolicyEngine(),
+  resources,
+  audit,
+  approvals,
+  store,
+);
+const runner = createRunner(config, store, { credentials, audit });
+const identity = new IdentityService();
 const service = new AgentService(config, store, workspaces, runner);
 await service.initialize();
 
-const app = await createApp(config, service);
+const app = await createApp(config, service, identity, {
+  credentials,
+  gateway,
+  approvals,
+  audit,
+});
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, "Shutting down");

@@ -1,0 +1,26 @@
+# Package Manifest
+
+- `AGENTS.md`
+- `CODEX-LUNA-START.md`
+- `README.md`
+- `context/api-contract.md`
+- `context/architecture-decisions.md`
+- `context/architecture.md`
+- `context/audit-observability.md`
+- `context/build-plan.md`
+- `context/code-standards.md`
+- `context/library-docs.md`
+- `context/policy-contract.md`
+- `context/professional-rationale.md`
+- `context/progress-tracker.md`
+- `context/project-overview.md`
+- `context/runtime-protocol.md`
+- `context/security-model.md`
+- `context/source-map.md`
+- `context/system-design.md`
+- `context/testing-demo.md`
+- `context/ui-registry.md`
+- `context/ui-rules.md`
+- `context/ui-tokens.md`
+- `design/agentgate-codejam.architecture.json`
+- `design/agentgate-codejam.workflow.json`

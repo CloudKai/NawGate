@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
-import { isArkConfigured } from "./config.js";
+import { isModelConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import type { HumanPrincipal } from "./agentgate/types.js";
 import { JsonStore } from "./store.js";
 import type {
   Agent,
@@ -46,25 +47,29 @@ export class AgentService {
     });
   }
 
-  listAgents(): Agent[] {
+  listAgents(actor: HumanPrincipal): Agent[] {
     return this.store
       .snapshot()
-      .agents.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .agents
+      .filter((agent) => agent.ownerUserId === actor.id)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  getAgent(id: string): Agent {
+  getAgent(id: string, actor: HumanPrincipal): Agent {
     const agent = this.store.snapshot().agents.find((item) => item.id === id);
-    if (!agent) {
+    // Ownership is checked below the HTTP layer so internal callers cannot bypass it.
+    if (!agent || agent.ownerUserId !== actor.id) {
       throw new HttpError(404, "Agent not found");
     }
     return agent;
   }
 
-  async createAgent(input: CreateAgentInput): Promise<Agent> {
+  async createAgent(input: CreateAgentInput, actor: HumanPrincipal): Promise<Agent> {
     const timestamp = now();
     const id = randomUUID();
     const agent: Agent = {
       id,
+      ownerUserId: actor.id,
       name: input.name.trim(),
       description: input.description?.trim() ?? "",
       instructions: input.instructions?.trim() ?? "",
@@ -80,14 +85,18 @@ export class AgentService {
     return agent;
   }
 
-  async updateAgent(id: string, input: UpdateAgentInput): Promise<Agent> {
-    const current = this.getAgent(id);
+  async updateAgent(
+    id: string,
+    input: UpdateAgentInput,
+    actor: HumanPrincipal,
+  ): Promise<Agent> {
+    const current = this.getAgent(id, actor);
     if (current.status === "busy") {
       throw new HttpError(409, "Stop the active run before editing this Agent");
     }
     const updated = await this.store.mutate((database) => {
       const agent = database.agents.find((item) => item.id === id);
-      if (!agent) {
+      if (!agent || agent.ownerUserId !== actor.id) {
         throw new HttpError(404, "Agent not found");
       }
       if (agent.status === "busy") {
@@ -104,8 +113,11 @@ export class AgentService {
     return updated;
   }
 
-  async deleteAgent(id: string): Promise<{ archivedWorkspace: string }> {
-    const agent = this.getAgent(id);
+  async deleteAgent(
+    id: string,
+    actor: HumanPrincipal,
+  ): Promise<{ archivedWorkspace: string }> {
+    const agent = this.getAgent(id, actor);
     await this.cancelExecution(id);
     const archivedWorkspace = await this.workspaces.archive(agent);
     await this.store.mutate((database) => {
@@ -116,34 +128,36 @@ export class AgentService {
     return { archivedWorkspace };
   }
 
-  async startAgent(id: string): Promise<Agent> {
-    return this.setStatus(id, "ready");
+  async startAgent(id: string, actor: HumanPrincipal): Promise<Agent> {
+    this.getAgent(id, actor);
+    return this.setStatus(id, "ready", actor);
   }
 
-  async stopAgent(id: string): Promise<Agent> {
-    this.getAgent(id);
+  async stopAgent(id: string, actor: HumanPrincipal): Promise<Agent> {
+    this.getAgent(id, actor);
     await this.cancelExecution(id);
-    return this.setStatus(id, "stopped");
+    return this.setStatus(id, "stopped", actor);
   }
 
-  getMessages(agentId: string): Message[] {
-    this.getAgent(agentId);
+  getMessages(agentId: string, actor: HumanPrincipal): Message[] {
+    this.getAgent(agentId, actor);
     return this.store
       .snapshot()
       .messages.filter((message) => message.agentId === agentId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
-  getRun(runId: string): AgentRun {
+  getRun(runId: string, actor: HumanPrincipal): AgentRun {
     const run = this.store.snapshot().runs.find((item) => item.id === runId);
     if (!run) {
       throw new HttpError(404, "Run not found");
     }
+    this.getAgent(run.agentId, actor);
     return run;
   }
 
-  getRuns(agentId: string): AgentRun[] {
-    this.getAgent(agentId);
+  getRuns(agentId: string, actor: HumanPrincipal): AgentRun[] {
+    this.getAgent(agentId, actor);
     return this.store
       .snapshot()
       .runs.filter((run) => run.agentId === agentId)
@@ -153,11 +167,13 @@ export class AgentService {
   async sendMessage(
     agentId: string,
     prompt: string,
+    actor: HumanPrincipal,
   ): Promise<{ run: AgentRun; message: Message }> {
-    if (!isArkConfigured(this.config)) {
+    this.getAgent(agentId, actor);
+    if (!isModelConfigured(this.config)) {
       throw new HttpError(
         503,
-        "Ark is not configured. Set ARK_API_KEY and ARK_MODEL, then restart.",
+        "The selected model provider is not configured. Set its API key and model, then restart.",
       );
     }
     const timestamp = now();
@@ -184,7 +200,7 @@ export class AgentService {
     };
     const agentAtStart = await this.store.mutate((database) => {
       const storedAgent = database.agents.find((item) => item.id === agentId);
-      if (!storedAgent) {
+      if (!storedAgent || storedAgent.ownerUserId !== actor.id) {
         throw new HttpError(404, "Agent not found");
       }
       if (storedAgent.status === "stopped") {
@@ -215,7 +231,13 @@ export class AgentService {
 
   async systemInfo(): Promise<Record<string, unknown>> {
     return {
-      arkConfigured: isArkConfigured(this.config),
+      modelProvider: this.config.modelProvider,
+      modelConfigured: isModelConfigured(this.config),
+      modelBaseUrl: this.config.modelBaseUrl,
+      modelName: this.config.modelName || null,
+      // Keep these fields for existing UI clients while they migrate to the
+      // provider-neutral fields above.
+      arkConfigured: this.config.modelProvider === "ark" && isModelConfigured(this.config),
       arkBaseUrl: this.config.arkBaseUrl,
       arkModel: this.config.arkModel || null,
       codexAvailable: await this.runner.isAvailable(),
@@ -246,6 +268,8 @@ export class AgentService {
       }
       const result = await this.runner.run({
         agentId: agentAtStart.id,
+        ownerUserId: agentAtStart.ownerUserId,
+        runId: run.id,
         workspacePath: agentAtStart.workspacePath,
         prompt: run.prompt,
         threadId: agentAtStart.codexThreadId,
@@ -295,10 +319,14 @@ export class AgentService {
     }
   }
 
-  private async setStatus(id: string, status: Agent["status"]): Promise<Agent> {
+  private async setStatus(
+    id: string,
+    status: Agent["status"],
+    actor: HumanPrincipal,
+  ): Promise<Agent> {
     return this.store.mutate((database) => {
       const agent = database.agents.find((item) => item.id === id);
-      if (!agent) {
+      if (!agent || agent.ownerUserId !== actor.id) {
         throw new HttpError(404, "Agent not found");
       }
       if (status === "ready" && agent.status === "busy") {

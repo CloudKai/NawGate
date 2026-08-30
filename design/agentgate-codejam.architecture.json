@@ -1,0 +1,545 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AgentGate for CodeJam",
+    "subtitle": "Delegated authorization for autonomous Codex Agents",
+    "output": "agentgate-codejam.architecture.html",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "views": [
+      {
+        "id": "runtime-path",
+        "label": "Runtime path",
+        "focus": [
+          "human",
+          "web",
+          "api",
+          "service",
+          "runner",
+          "middleware",
+          "codex",
+          "ark"
+        ],
+        "note": "Preserve CodeJam runtime path and wrap it with Run-level middleware."
+      },
+      {
+        "id": "protected-action",
+        "label": "Protected action",
+        "focus": [
+          "codex",
+          "agentctl",
+          "gateway",
+          "policy",
+          "approval",
+          "resource",
+          "audit"
+        ],
+        "note": "Protected operations cross a trusted enforcement boundary before side effects."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "human",
+      "type": "external",
+      "label": "Human User",
+      "sublabel": "User A / User B",
+      "pos": [
+        20,
+        240
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "React Web UI",
+      "sublabel": "STARTER",
+      "pos": [
+        180,
+        240
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Fastify API",
+      "sublabel": "STARTER",
+      "pos": [
+        350,
+        240
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "identity",
+      "type": "security",
+      "label": "Identity + Ownership",
+      "sublabel": "NEW",
+      "pos": [
+        350,
+        80
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "service",
+      "type": "backend",
+      "label": "AgentService",
+      "sublabel": "STARTER",
+      "pos": [
+        530,
+        240
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "RunnerFactory",
+      "sublabel": "STARTER",
+      "pos": [
+        710,
+        240
+      ],
+      "size": [
+        145,
+        60
+      ]
+    },
+    {
+      "id": "middleware",
+      "type": "security",
+      "label": "MiddlewareRunner",
+      "sublabel": "NEW \u00b7 Run identity",
+      "pos": [
+        885,
+        240
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "credential",
+      "type": "security",
+      "label": "Short-Lived Runtime Credential",
+      "sublabel": "NEW \u00b7 per Run",
+      "pos": [
+        885,
+        80
+      ],
+      "size": [
+        190,
+        60
+      ]
+    },
+    {
+      "id": "codex",
+      "type": "backend",
+      "label": "Codex Runtime",
+      "sublabel": "STARTER \u00b7 process/container",
+      "pos": [
+        1090,
+        240
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "ark",
+      "type": "cloud",
+      "label": "Volcengine Ark",
+      "sublabel": "STARTER",
+      "pos": [
+        1290,
+        240
+      ],
+      "size": [
+        155,
+        60
+      ]
+    },
+    {
+      "id": "agentctl",
+      "type": "messagebus",
+      "label": "agentctl",
+      "sublabel": "NEW \u00b7 narrow protected tool",
+      "pos": [
+        1090,
+        430
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "RuntimeGateway",
+      "sublabel": "NEW \u00b7 PEP",
+      "pos": [
+        870,
+        560
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "security",
+      "label": "PolicyEngine",
+      "sublabel": "NEW \u00b7 PDP",
+      "pos": [
+        660,
+        560
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "approval",
+      "type": "security",
+      "label": "Approval + Capability",
+      "sublabel": "NEW \u00b7 JIT / one use",
+      "pos": [
+        660,
+        700
+      ],
+      "size": [
+        180,
+        60
+      ]
+    },
+    {
+      "id": "resource",
+      "type": "database",
+      "label": "Protected Resource",
+      "sublabel": "NEW \u00b7 outside workspace",
+      "pos": [
+        1090,
+        700
+      ],
+      "size": [
+        185,
+        60
+      ]
+    },
+    {
+      "id": "audit",
+      "type": "database",
+      "label": "Audit Timeline",
+      "sublabel": "NEW \u00b7 redacted evidence",
+      "pos": [
+        870,
+        700
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "opa",
+      "type": "external",
+      "label": "OPA Pattern",
+      "sublabel": "PDP/PEP inspiration",
+      "pos": [
+        420,
+        560
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "spiffe",
+      "type": "external",
+      "label": "SPIFFE Pattern",
+      "sublabel": "workload identity inspiration",
+      "pos": [
+        420,
+        700
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "otel",
+      "type": "external",
+      "label": "OpenTelemetry",
+      "sublabel": "STRETCH exporter",
+      "pos": [
+        870,
+        840
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "external",
+      "label": "MCP Gateway",
+      "sublabel": "STRETCH tool transport",
+      "pos": [
+        1300,
+        430
+      ],
+      "size": [
+        160,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "CloudKai/CodeJam starter",
+      "wraps": [
+        "web",
+        "api",
+        "service",
+        "runner",
+        "codex",
+        "ark"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "AgentGate authorization boundary",
+      "wraps": [
+        "identity",
+        "middleware",
+        "credential",
+        "agentctl",
+        "gateway",
+        "policy",
+        "approval",
+        "resource",
+        "audit"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "human-web",
+      "from": "human",
+      "to": "web",
+      "variant": "emphasis"
+    },
+    {
+      "id": "web-api",
+      "from": "web",
+      "to": "api",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-identity",
+      "from": "api",
+      "to": "identity",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-service",
+      "from": "api",
+      "to": "service",
+      "variant": "emphasis"
+    },
+    {
+      "id": "identity-service",
+      "from": "identity",
+      "to": "service",
+      "label": "owner context",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "service-runner",
+      "from": "service",
+      "to": "runner",
+      "variant": "emphasis"
+    },
+    {
+      "id": "runner-middleware",
+      "from": "runner",
+      "to": "middleware",
+      "variant": "emphasis"
+    },
+    {
+      "id": "middleware-credential",
+      "from": "middleware",
+      "to": "credential",
+      "label": "issue/revoke",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "middleware-codex",
+      "from": "middleware",
+      "to": "codex",
+      "variant": "emphasis"
+    },
+    {
+      "id": "codex-ark",
+      "from": "codex",
+      "to": "ark",
+      "variant": "emphasis"
+    },
+    {
+      "id": "codex-agentctl",
+      "from": "codex",
+      "to": "agentctl",
+      "label": "protected action",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "credential-gateway",
+      "from": "credential",
+      "to": "gateway",
+      "label": "runtime identity",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "agentctl-gateway",
+      "from": "agentctl",
+      "to": "gateway",
+      "variant": "security"
+    },
+    {
+      "id": "gateway-policy",
+      "from": "gateway",
+      "to": "policy",
+      "label": "evaluate",
+      "variant": "security"
+    },
+    {
+      "id": "policy-approval",
+      "from": "policy",
+      "to": "approval",
+      "label": "high risk",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "approval-gateway",
+      "from": "approval",
+      "to": "gateway",
+      "label": "one-use lease",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "gateway-resource",
+      "from": "gateway",
+      "to": "resource",
+      "label": "only after allow",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "gateway-audit",
+      "from": "gateway",
+      "to": "audit",
+      "label": "record decision",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "opa-policy",
+      "from": "opa",
+      "to": "policy",
+      "variant": "dashed"
+    },
+    {
+      "id": "spiffe-credential",
+      "from": "spiffe",
+      "to": "credential",
+      "variant": "dashed"
+    },
+    {
+      "id": "audit-otel",
+      "from": "audit",
+      "to": "otel",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "agentctl-mcp",
+      "from": "agentctl",
+      "to": "mcp",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Starter retained",
+      "items": [
+        "React/Fastify/AgentService stay intact",
+        "Existing Codex runners stay execution providers",
+        "Volcengine Ark remains model endpoint"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "AgentGate MVP",
+      "items": [
+        "Human/Agent ownership",
+        "Run credential + policy gateway",
+        "Cross-user denial, human approval, one-use capability, audit"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Professional upgrade path",
+      "items": [
+        "OPA adapter behind PolicyEngine",
+        "SPIFFE/SPIRE production workload identity",
+        "OpenTelemetry exporter and MCP tool interface"
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,6 +15,53 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
+  it("migrates v1 data to v2 without dropping starter records", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        agents: [
+          {
+            id: "agent-1",
+            name: "Legacy",
+            description: "",
+            instructions: "",
+            status: "ready",
+            workspacePath: path.join(root, "workspace"),
+            codexThreadId: null,
+            lastError: null,
+            createdAt: "2026-08-30T00:00:00.000Z",
+            updatedAt: "2026-08-30T00:00:00.000Z",
+          },
+        ],
+        messages: [],
+        runs: [],
+      }),
+      "utf8",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    const database = store.snapshot();
+    expect(database.version).toBe(2);
+    expect(database.agents[0]?.ownerUserId).toBe("user-a");
+    expect(database.protectedResources.map((resource) => resource.id)).toEqual([
+      "project-a",
+      "project-b",
+      "staging",
+      "production",
+    ]);
+    expect(database.deploymentStates.map((state) => state.resourceId)).toEqual([
+      "staging",
+      "production",
+    ]);
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 2 });
+  });
+
   it("does not publish a mutation in memory when persistence fails", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
     temporaryDirectories.push(root);

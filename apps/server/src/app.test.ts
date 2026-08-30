@@ -17,12 +17,39 @@ describe("HTTP boundary", () => {
     const denied = await app.inject({ method: "GET", url: "/api/agents" });
     expect(denied.statusCode).toBe(401);
 
-    const allowed = await app.inject({
+    const noHumanSession = await app.inject({
       method: "GET",
       url: "/api/agents",
       headers: { authorization: "Bearer a-strong-test-token" },
     });
+    expect(noHumanSession.statusCode).toBe(401);
+
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer a-strong-test-token" },
+      payload: { userId: "user-a" },
+    });
+    expect(session.statusCode).toBe(200);
+    const { sessionToken } = session.json() as { sessionToken: string };
+    const allowed = await app.inject({
+      method: "GET",
+      url: "/api/agents",
+      headers: {
+        authorization: "Bearer a-strong-test-token",
+        "x-agentgate-session": sessionToken,
+      },
+    });
     expect(allowed.statusCode).toBe(200);
+    const me = await app.inject({
+      method: "GET",
+      url: "/api/demo/me",
+      headers: {
+        authorization: "Bearer a-strong-test-token",
+        "x-agentgate-session": sessionToken,
+      },
+    });
+    expect(me.json()).toEqual({ user: { id: "user-a", name: "User A" } });
     await app.close();
   });
 
@@ -35,6 +62,14 @@ describe("HTTP boundary", () => {
       payload: "{not-json",
     });
     expect(malformed.statusCode).toBe(400);
+
+    const forgedOwner = await app.inject({
+      method: "POST",
+      url: "/api/agents",
+      headers: { "content-type": "application/json" },
+      payload: { name: "forged", ownerUserId: "user-b" },
+    });
+    expect(forgedOwner.statusCode).toBe(400);
 
     const oversized = await app.inject({
       method: "POST",

@@ -1,16 +1,16 @@
 # Volc Agent Launchpad
 
 A minimal Agent platform for three-day middleware hackathons. It provides Agent
-CRUD, a browser Playground, persistent workspaces, and Codex CLI backed by the
-Volcengine Ark Responses API.
+CRUD, a browser Playground, persistent workspaces, and an AgentGate Bouncer
+boundary for registered protected actions.
 
 Run it locally with Docker, Colima, or rootless Podman, or deploy it to
 Volcengine ECS.
 
 > [!WARNING]
-> This is a single-user proof of concept. It intentionally has no identity,
-> tracing, audit, or hardened sandbox middleware. Do not use production data or
-> credentials. See [SECURITY.md](SECURITY.md).
+> This is a proof of concept. AgentGate protects only registered actions routed
+> through `agentctl`; it does not intercept every internal Codex shell or file
+> operation. Do not use production data or credentials. See [SECURITY.md](SECURITY.md).
 
 ## Screenshots
 
@@ -28,6 +28,7 @@ Volcengine ECS.
 - Agent create, edit, start, stop, delete, and multi-turn chat
 - Fastify control plane with asynchronous Run state
 - Persistent Agent workspaces and Codex sessions
+- AgentGate identity, ownership, approval, one-use capability, and redacted audit evidence
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -36,7 +37,8 @@ Volcengine ECS.
 - Node.js 22+
 - npm 10+
 - Docker, Colima, or Podman
-- A Volcengine Ark API key and endpoint that supports the Responses API
+- Either a Volcengine Ark credential or an OpenAI-compatible Responses API
+  credential and model
 
 Codex CLI is included in the Runtime image and is not required on the host.
 
@@ -68,10 +70,26 @@ Skip this step when already working from the repository root.
 ### 3. Start the POC
 
 ```bash
+APP_AUTH_TOKEN=techjam-local-demo-token-123456 \
 ARK_API_KEY=your-ark-api-key \
 ARK_MODEL=ep-your-endpoint-id \
 npm run poc
 ```
+
+To use OpenAI or another provider with an OpenAI-compatible Responses endpoint:
+
+```bash
+APP_AUTH_TOKEN=techjam-local-demo-token-123456 \
+MODEL_PROVIDER=openai-compatible \
+OPENAI_API_KEY=your-openai-api-key \
+OPENAI_MODEL=gpt-5 \
+OPENAI_BASE_URL=https://api.openai.com/v1 \
+npm run poc
+```
+
+`OPENAI_BASE_URL` can point to another provider's compatible endpoint. The
+runtime uses the Responses API wire format and passes the selected provider's
+key only to the Codex Runtime.
 
 The first run installs Node.js dependencies and builds the Runtime image. The
 script automatically selects Docker, Colima, or Podman.
@@ -99,6 +117,13 @@ In the Web UI:
 The Agent can write files, run commands, and continue the same Codex session in
 later messages.
 
+Protected AgentGate actions use the installed `agentctl` command. The official
+`npm run poc` container installs it automatically. Protected-action credentials
+are intentionally not injected into `local-process` Runs because the Agent and
+server child process share a filesystem there; use the disposable container
+Runtime for the protected-action demo. Normal coding Runs continue to work in
+either provider.
+
 ### 5. Stop and resume
 
 Press `Ctrl+C` in the startup terminal. The script removes temporary Runtime
@@ -116,6 +141,7 @@ Force Podman when multiple engines are installed:
 
 ```bash
 CONTAINER_ENGINE=podman \
+APP_AUTH_TOKEN=techjam-local-demo-token-123456 \
 ARK_API_KEY=your-ark-api-key \
 ARK_MODEL=ep-your-endpoint-id \
 npm run poc
@@ -137,10 +163,14 @@ Create and edit the configuration:
 Required values in `.env`:
 
 ```dotenv
+MODEL_PROVIDER=ark
 ARK_API_KEY=your-ark-api-key
 ARK_MODEL=ep-your-endpoint-id
 APP_AUTH_TOKEN=replace-with-at-least-24-random-characters
 ```
+
+For OpenAI-compatible mode, use `MODEL_PROVIDER=openai-compatible` together
+with `OPENAI_API_KEY`, `OPENAI_MODEL`, and optionally `OPENAI_BASE_URL`.
 
 Start the application:
 
@@ -199,13 +229,19 @@ cp deploy/volcengine/terraform.tfvars.example \
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ARK_API_KEY` | Required | Ark model API key. |
-| `ARK_MODEL` | Required | Responses-capable endpoint or model ID. |
+| `MODEL_PROVIDER` | `ark` | `ark` or `openai-compatible`. |
+| `ARK_API_KEY` | Required for Ark | Ark model API key. |
+| `ARK_MODEL` | Required for Ark | Responses-capable endpoint or model ID. |
 | `ARK_BASE_URL` | Beijing v3 endpoint | Ark OpenAI-compatible API URL. |
+| `OPENAI_API_KEY` | Required for OpenAI-compatible | OpenAI or compatible provider API key. |
+| `OPENAI_MODEL` | Required for OpenAI-compatible | Responses-capable model ID. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible Responses API URL. |
 | `APP_AUTH_TOKEN` | Empty on loopback | Shared demo token; use 24+ random characters remotely. |
 | `RUNTIME_PROVIDER` | `local-process` | `container` for disposable local Runtime containers. |
 | `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |
 | `CODEX_TIMEOUT_MS` | `600000` | Maximum duration of one turn. |
+| `AGENTGATE_GATEWAY_URL` | `http://127.0.0.1:<PORT>` | Runtime gateway URL injected into each Run. |
+| `AGENTGATE_APPROVAL_WAIT_MS` | `90000` | Maximum time `agentctl` waits for owner approval. |
 | `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.
@@ -219,8 +255,8 @@ flowchart LR
     API --> Runtime{"Runtime provider"}
     Runtime -->|Local POC| Container["Disposable Docker / Colima / Podman container"]
     Runtime -->|ECS profile| Codex["Codex CLI in application container"]
-    Container --> Ark["Volcengine Ark Responses API"]
-    Codex --> Ark
+    Container --> Provider["Ark / OpenAI-compatible Responses API"]
+    Codex --> Provider
 ```
 
 The first turn uses `codex exec`; later turns resume the stored Codex thread.

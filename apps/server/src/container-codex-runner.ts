@@ -56,6 +56,9 @@ export function buildContainerRunArgs(
     ...(engineName === "podman" ? ["--userns", "keep-id"] : []),
     "--network",
     "bridge",
+    ...(engineName === "docker"
+      ? ["--add-host", "host.docker.internal:host-gateway"]
+      : []),
     "--security-opt",
     "no-new-privileges",
     "--cap-drop",
@@ -69,13 +72,19 @@ export function buildContainerRunArgs(
     "--user",
     config.containerUser,
     "--env",
-    "ARK_API_KEY",
+    config.modelApiKeyEnv,
     "--env",
     "CODEX_HOME=/codex-home",
     "--env",
     "HOME=/tmp",
     "--env",
     "NO_COLOR=1",
+    "--env",
+    "AGENTGATE_RUNTIME_TOKEN",
+    "--env",
+    "AGENTGATE_GATEWAY_URL",
+    "--env",
+    "AGENTGATE_APPROVAL_WAIT_MS",
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
@@ -147,7 +156,7 @@ export class ContainerCodexRunner implements AgentRunner {
       buildContainerRunArgs(request, this.config),
       {
         cwd: request.workspacePath,
-        env: this.childEnvironment(),
+        env: this.childEnvironment(request),
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -235,9 +244,9 @@ export class ContainerCodexRunner implements AgentRunner {
     }
   }
 
-  private childEnvironment(): NodeJS.ProcessEnv {
+  private childEnvironment(request?: RunnerRequest): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = {
-      ARK_API_KEY: this.config.arkApiKey,
+      [this.config.modelApiKeyEnv]: this.config.modelApiKey,
       NO_COLOR: "1",
     };
     for (const name of [
@@ -249,6 +258,11 @@ export class ContainerCodexRunner implements AgentRunner {
       "XDG_RUNTIME_DIR",
     ] as const) {
       if (process.env[name] !== undefined) environment[name] = process.env[name];
+    }
+    if (request?.runtime) {
+      environment.AGENTGATE_RUNTIME_TOKEN = request.runtime.token;
+      environment.AGENTGATE_GATEWAY_URL = request.runtime.gatewayUrl;
+      environment.AGENTGATE_APPROVAL_WAIT_MS = String(request.runtime.approvalWaitMs);
     }
     return environment;
   }

@@ -63,11 +63,26 @@ detect_engine() {
   return 1
 }
 
-if [[ -z "${ARK_API_KEY:-}" || -z "${ARK_MODEL:-}" ]]; then
-  log "ARK_API_KEY and ARK_MODEL are required."
-  log "Example: ARK_API_KEY=key ARK_MODEL=ep-id ./scripts/start-local-poc.sh"
-  exit 2
-fi
+model_provider="${MODEL_PROVIDER:-ark}"
+case "$model_provider" in
+  ark)
+    if [[ -z "${ARK_API_KEY:-}" || -z "${ARK_MODEL:-}" ]]; then
+      log "ARK_API_KEY and ARK_MODEL are required for MODEL_PROVIDER=ark."
+      log "Alternatively set MODEL_PROVIDER=openai-compatible with OPENAI_API_KEY and OPENAI_MODEL."
+      exit 2
+    fi
+    ;;
+  openai-compatible)
+    if [[ -z "${OPENAI_API_KEY:-}" || -z "${OPENAI_MODEL:-}" ]]; then
+      log "OPENAI_API_KEY and OPENAI_MODEL are required for MODEL_PROVIDER=openai-compatible."
+      exit 2
+    fi
+    ;;
+  *)
+    log "MODEL_PROVIDER must be ark or openai-compatible."
+    exit 2
+    ;;
+esac
 
 command -v node >/dev/null 2>&1 || {
   log "Node.js 22+ is required to run the local control plane."
@@ -146,13 +161,26 @@ if [[ "$codex_sandbox_mode" == "workspace-write" ]] \
 fi
 
 export NODE_ENV=production
-export HOST="${HOST:-127.0.0.1}"
+export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-3000}"
 export CODEX_SANDBOX_MODE="$codex_sandbox_mode"
 export RUNTIME_PROVIDER=container
 export CONTAINER_ENGINE="$engine"
 export CONTAINER_RUNTIME_IMAGE="$runtime_image"
+if [[ -z "${AGENTGATE_GATEWAY_URL:-}" ]]; then
+  if [[ "$(basename "$engine")" == "podman" ]]; then
+    export AGENTGATE_GATEWAY_URL="http://host.containers.internal:$PORT"
+  else
+    export AGENTGATE_GATEWAY_URL="http://host.docker.internal:$PORT"
+  fi
+fi
+if [[ -z "${APP_AUTH_TOKEN:-}" ]]; then
+  log "APP_AUTH_TOKEN is required because the control plane listens on $HOST."
+  log "Set a 24+ character URL-safe token and enter the same value in the browser."
+  exit 2
+fi
 
+server_pid=""
 cleanup() {
   local container_ids
   container_ids="$($engine ps --all --quiet \
@@ -164,6 +192,10 @@ cleanup() {
       [[ -n "$container_id" ]] && "$engine" rm --force "$container_id" >/dev/null 2>&1 || true
     done <<<"$container_ids"
   fi
+  if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -174,4 +206,33 @@ log "Building the local Web and API."
 npm run build
 
 log "Open http://localhost:$PORT"
-npm start
+npm start &
+server_pid=$!
+
+control_plane_ready=0
+for _ in {1..30}; do
+  if node -e 'fetch(process.argv[1]).then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))' \
+    "http://127.0.0.1:$PORT/api/health"; then
+    control_plane_ready=1
+    break
+  fi
+  sleep 1
+done
+if (( control_plane_ready == 0 )); then
+  log "The control plane did not become healthy on port $PORT."
+  exit 2
+fi
+
+probe_args=(run --rm --network bridge)
+if [[ "$(basename "$engine")" == "docker" ]]; then
+  probe_args+=(--add-host host.docker.internal:host-gateway)
+fi
+if ! "$engine" "${probe_args[@]}" \
+  --env "AGENTGATE_PROBE_URL=$AGENTGATE_GATEWAY_URL" \
+  "$runtime_image" node -e \
+  'fetch(process.env.AGENTGATE_PROBE_URL + "/api/health").then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))'; then
+  log "The Agent Runtime cannot reach $AGENTGATE_GATEWAY_URL."
+  exit 2
+fi
+
+wait "$server_pid"
