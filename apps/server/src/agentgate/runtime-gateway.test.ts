@@ -128,6 +128,15 @@ describe("RuntimeGateway", () => {
       expect(result.result.content).toContain("project-a");
     }
     expect(resources.getExecutionCount("resource.read", "project-a")).toBe(1);
+    expect(audit.list("agent-a")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "policy.allow",
+          reasonCode: "owned_resource_read",
+          explanation: "The Agent is authorized as the owner of this protected resource.",
+        }),
+      ]),
+    );
     expect(JSON.stringify(audit.list("agent-a"))).not.toContain(
       "Synthetic profile for project-a",
     );

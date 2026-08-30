@@ -111,6 +111,15 @@ function explanationFor(
   resource: ProtectedResource | null,
   reasonCode: string,
 ): string {
+  if (reasonCode === "owned_resource_read") {
+    return "The Agent is authorized as the owner of this protected resource.";
+  }
+  if (reasonCode === "team_file_read") {
+    return "The Agent's persistent team grant and trusted human membership permit this protected file read.";
+  }
+  if (reasonCode === "owned_staging_deploy") {
+    return "The Agent is authorized to deploy this owned resource to staging.";
+  }
   if (reasonCode === "resource_owner_mismatch" && resource) {
     return `The Agent is acting for ${context.humanId}, but ${resource.id} is owned by ${resource.ownerUserId}.`;
   }
