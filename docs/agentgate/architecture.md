@@ -1,5 +1,14 @@
 # AgentGate architecture
 
+Interactive architecture: [architecture.html](architecture.html)
+Editable Archify source: [architecture.archify.json](architecture.archify.json)
+
+The interactive map is source-evidence-backed to commit
+`028013c809134303a2d60dd0acff86efe9f4d156`. It is the judge-facing overview;
+this page is the concise GitHub-readable companion.
+
+## Compact GitHub fallback
+
 ```mermaid
 flowchart LR
   Human[Human session] --> UI[React Web UI]
@@ -21,10 +30,11 @@ flowchart LR
 
 ## Trust boundaries
 
-The browser session is a human control-plane credential, not the Agent's
-runtime identity. The browser cannot choose `humanId`, `ownerUserId`, `agentId`,
-or `runId` for a protected action. The backend derives those values from the
-stored Agent and the issued Run credential.
+AgentGate keeps **Human != Agent != Run**. The browser session represents a
+human control-plane principal. It cannot select `humanId`, `ownerUserId`,
+`agentId`, `runId`, team membership, grant, role, or policy outcome for a
+protected action. The backend resolves the Agent owner from storage and gives
+each Run a scoped, short-lived runtime identity.
 
 For team-owned files, the Runtime also cannot assert a team, role, or Agent
 grant. The gateway resolves both the current human-to-team relationship and
@@ -35,6 +45,12 @@ those server-owned attributes with the Run and protected resource.
 decision and calls the protected-resource boundary only after authorization.
 Protected payloads remain behind that boundary and are never written into an
 Agent workspace or audit event.
+
+`RuntimeGateway` is the Policy Enforcement Point (PEP). The deterministic
+`PolicyEngine` is the Policy Decision Point (PDP). The model may request a
+registered action through `agentctl`; it never decides whether the outcome is
+allow, deny, or approval-required. Ark/OpenAI-compatible model traffic is a
+separate Runtime dependency, not an authorization authority.
 
 ## Main flows
 
@@ -82,6 +98,41 @@ resource metadata, policy, and exact capability immediately before the
 protected side effect. Revocation or changed authority at that point denies
 the queued action without executing it.
 
+### Policy outcomes
+
+- **ALLOW:** User A's valid Team Alpha viewer grant can read an internal Team
+  Alpha file.
+- **REQUIRE_APPROVAL:** the same viewer requesting a restricted Team Alpha
+  file is JIT-eligible only after all hard prerequisites pass.
+- **DENY:** cross-user or cross-team access, missing membership, missing,
+  revoked, expired, or under-scoped grant, invalid Run authority, replayed
+  capability, forged attributes, malformed request, and unknown resource all
+  fail closed. Approval never repairs a hard deny.
+
+The resulting JIT capability is bound to one human, Agent, Run, request ID,
+action, resource, grant/bundle, and effective scope. It expires, is revocable,
+is consumed once, and does not turn a persistent viewer grant into an editor
+grant.
+
+## Revocation, replay, and final recheck
+
+Owner Run revocation invalidates the runtime credential and pending/approved
+capabilities. Agent Team Grant revocation likewise invalidates active Run
+authority and related capabilities. `RuntimeGateway` serializes protected
+execution and re-resolves mutable authority immediately before capability use
+and again adjacent to the registered protected side effect. This blocks a
+queued initial allow after authority has changed. Stored execution records make
+same-request retries idempotent and reject request substitution conflicts.
+
+## Audit and Delegation Receipt
+
+`AuditService` records redacted decision evidence: Human, Agent, Run, action,
+resource ID, team/grant/bundle metadata, decision/reason, approval/capability
+status, policy version, enforcement point, and whether the protected side
+effect executed. The Web Delegation Receipt is a safe human-readable view of
+that evidence. Neither surface includes a raw runtime credential, API key, or
+protected payload.
+
 ## Security Lab
 
 The local-only Security Lab calls the real `RuntimeGateway`; the Web UI never
@@ -104,3 +155,12 @@ terminate every internal Codex operation already running in the container.
 Persistent enrollment uses `GET/POST /api/agents/:id/team-grants` and
 `POST /api/agents/:id/team-grants/:grantId/revoke`. The current POC requires
 the same human to own the Agent and hold the team-admin relationship.
+
+## Scope limits
+
+AgentGate protects registered actions routed through `agentctl` and
+`RuntimeGateway`. It does not claim to intercept every internal Codex shell
+command, arbitrary local filesystem operation, or arbitrary network request.
+It is a single-process hackathon POC with demo identities/relationships and
+ordinary disposable containers—not enterprise IAM, SSO/OIDC, distributed
+authorization, or hardened multi-tenant isolation.

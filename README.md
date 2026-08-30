@@ -1,8 +1,13 @@
 # Volc Agent Launchpad
 
 A minimal Agent platform for three-day middleware hackathons. It provides Agent
-CRUD, a browser Playground, persistent workspaces, and an AgentGate Bouncer
-boundary for registered protected actions.
+CRUD, a browser Playground, persistent workspaces, and **AgentGate**:
+backend-enforced delegated identity and authorization for autonomous Agents.
+
+AgentGate separates Human, Agent, and Run authority. A human's permission does
+not automatically become an Agent's permission: persistent Agent grants are
+narrow, every Run has temporary identity, and each registered protected action
+is evaluated at a trusted backend gateway.
 
 Run it locally with Docker, Colima, or rootless Podman, or deploy it to
 Volcengine ECS.
@@ -29,10 +34,22 @@ Volcengine ECS.
 - Fastify control plane with asynchronous Run state
 - Persistent Agent workspaces and Codex sessions
 - AgentGate identity, ownership, approval, one-use capability, and redacted audit evidence
-- Persistent Team Agent grants intersected with human membership, Run identity,
-  resource role thresholds, and final pre-execution rechecks
-- One-use JIT elevation for restricted team-file reads, with a judge-facing
-  Security Lab in the side panel
+- Human != Agent != Run separation with backend-owned Agent ownership and
+  short-lived trusted Runtime identity per Run
+- Team memberships plus persistent Team Agent grants with independent viewer,
+  editor, and admin roles, action scope, optional expiry, bundle evidence, and
+  explicit grant revocation
+- `bouncer-v4` deterministic policy with cross-user/cross-team hard deny,
+  trusted server-side attribute resolution, replay/idempotency protection, and
+  final pre-side-effect authorization rechecks
+- Owner approval for high-risk production deploys and exact one-use JIT
+  elevation for restricted team-file reads; JIT never mutates the Agent's
+  persistent viewer grant
+- Redacted audit timeline and Delegation Receipt with policy version, reason,
+  enforcement point, safe authority evidence, and side-effect status
+- Local/demo-only Security Lab that exercises the real RuntimeGateway for
+  allow, deny, JIT, replay, forged-input, grant/Run revocation, and queued
+  stale-allow denial scenarios
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -52,6 +69,34 @@ Runtime cannot assert any of them. See the
 [AgentGate overview](docs/agentgate/overview.md),
 [standards alignment](docs/agentgate/standards.md), and
 [three-minute demo](docs/agentgate/demo.md).
+
+## Architecture
+
+Open the judge-facing [interactive architecture](docs/agentgate/architecture.html),
+its editable [Archify source](docs/agentgate/architecture.archify.json), or the
+compact [GitHub-readable architecture](docs/agentgate/architecture.md).
+
+```text
+Human → React Web UI → Fastify control plane → AgentService / MiddlewareRunner
+      → disposable Runtime → Codex + agentctl → RuntimeGateway (PEP)
+      → PolicyEngine (PDP) + authority services → protected resource boundary
+```
+
+Effective protected-action authority is the intersection of:
+
+```text
+human team membership
+AND persistent Agent Team grant
+AND short-lived Run identity
+AND protected-resource requirements
+AND exact one-use JIT capability, when required
+```
+
+For example, a Team Alpha admin may enroll a Research Agent as a Team Alpha
+viewer. The Agent can read an internal Alpha file. A restricted Alpha read is
+`REQUIRE_APPROVAL`; owner approval permits that exact read once and the Agent
+remains a viewer. Team Beta, a consumed-capability replay, or revoked authority
+is `DENY`. Approval never bypasses a hard deny.
 
 ## Requirements
 
@@ -150,8 +195,12 @@ The Web UI also exposes a **Delegation receipt** for the latest approval and a
 fixture, it also exposes persistent Agent enrollment and revocation. These
 controls show safe metadata and status only; they do not expose credentials or
 protected payloads. When `AGENTGATE_SECURITY_LAB_ENABLED=true`, the side panel
-also exposes real-gateway checks for allow, deny, JIT, replay, forgery, and
-revocation scenarios.
+also exposes real-gateway checks for allow, cross-user/cross-team deny, JIT
+approval and replay denial, forged trusted-field rejection, Run/grant
+revocation, and a queued initial-allow → revoke → final-recheck denial. The
+Lab is a supporting demonstration, not a second authorization engine; it keeps
+synthetic runtime credentials and protected payloads server-side and cleans up
+terminal demo Run authority.
 
 ### 5. Stop and resume
 
@@ -293,21 +342,42 @@ The first turn uses `codex exec`; later turns resume the stored Codex thread.
 Deleting an Agent archives its workspace under `workspaces/.deleted/`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
-boundaries.
+boundaries. For AgentGate's current trust boundaries and policy semantics, use
+the [interactive architecture](docs/agentgate/architecture.html).
+
+## AgentGate scope and limitations
+
+AgentGate currently protects registered protected actions routed through
+`agentctl` and `RuntimeGateway`. It does not intercept every Codex shell
+command, arbitrary local filesystem operation, or arbitrary network request.
+This is a single-process hackathon POC: it does not replace enterprise IAM,
+OIDC/SSO, production directory lifecycle, distributed authorization, full
+multi-Agent coordination, or hardened multi-tenant container isolation.
+
+Protected payloads are intentionally outside Agent workspaces, audit storage,
+and Delegation Receipts. The raw short-lived runtime credential is never shown
+in the Web UI, receipt, audit, or Security Lab result.
 
 ## Validation
 
 ```bash
 npm run check
-CONTAINER_ENGINE=docker npm run test:container  # optional real-container smoke
+CONTAINER_ENGINE=docker npm run test:container  # optional, requires Docker/Podman
 terraform fmt -check -recursive deploy/volcengine
 docker compose config
 ```
 
+`npm run check` runs deterministic TypeScript, unit, API, gateway, and
+loopback end-to-end coverage. `npm run test:container` is a separately gated
+real Runtime/`agentctl` smoke test; do not treat it as passed unless a local
+container engine completed it successfully.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [AgentGate architecture](docs/agentgate/architecture.md)
+- [AgentGate architecture (interactive)](docs/agentgate/architecture.html)
+- [AgentGate architecture (Markdown)](docs/agentgate/architecture.md)
+- [AgentGate architecture source](docs/agentgate/architecture.archify.json)
 - [AgentGate decisions](docs/agentgate/decisions.md)
 - [AgentGate standards alignment](docs/agentgate/standards.md)
 - [Local POC](docs/LOCAL_POC.md)
