@@ -72,31 +72,13 @@ Runtime cannot assert any of them. See the
 
 ## Architecture
 
-Open the judge-facing [interactive architecture](docs/agentgate/architecture.html),
-its interactive [Archify architecture](docs/agentgate/architecture.html), or the
-compact [GitHub-readable architecture](docs/agentgate/architecture.md).
+AgentGate separates Human, Agent, and Run authority and enforces registered
+protected actions through a trusted backend authorization boundary.
 
-```text
-Human → React Web UI → Fastify control plane → AgentService / MiddlewareRunner
-      → disposable Runtime → Codex + agentctl → RuntimeGateway (PEP)
-      → PolicyEngine (PDP) + authority services → protected resource boundary
-```
+[![AgentGate architecture](docs/agentgate/architecture-share.png)](https://cloudkai.github.io/CodeJam/agentgate/architecture.html)
 
-Effective protected-action authority is the intersection of:
-
-```text
-human team membership
-AND persistent Agent Team grant
-AND short-lived Run identity
-AND protected-resource requirements
-AND exact one-use JIT capability, when required
-```
-
-For example, a Team Alpha admin may enroll a Research Agent as a Team Alpha
-viewer. The Agent can read an internal Alpha file. A restricted Alpha read is
-`REQUIRE_APPROVAL`; owner approval permits that exact read once and the Agent
-remains a viewer. Team Beta, a consumed-capability replay, or revoked authority
-is `DENY`. Approval never bypasses a hard deny.
+Explore the [interactive AgentGate architecture](https://cloudkai.github.io/CodeJam/agentgate/architecture.html)
+or read the [GitHub-friendly architecture overview](docs/agentgate/architecture.md).
 
 ## Requirements
 
