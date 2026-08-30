@@ -1,6 +1,7 @@
 import type {
   Agent,
   AgentRun,
+  AgentTeamGrant,
   ApprovalRecord,
   AuditEvent,
   HumanId,
@@ -80,6 +81,21 @@ export const api = {
         "/audit?limit=" +
         limit +
         (runId ? "&runId=" + encodeURIComponent(runId) : ""),
+    ),
+  teamGrants: (id: string) =>
+    request<{ grants: AgentTeamGrant[] }>("/api/agents/" + id + "/team-grants"),
+  enrollTeamGrant: (
+    id: string,
+    body: { teamId: "team-alpha" | "team-beta"; role: "viewer" | "editor" | "admin"; expiresAt?: string | null },
+  ) =>
+    request<{ grant: AgentTeamGrant }>("/api/agents/" + id + "/team-grants", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  revokeTeamGrant: (id: string, grantId: string) =>
+    request<{ result: { grant: AgentTeamGrant; runsRevoked: number } }>(
+      "/api/agents/" + id + "/team-grants/" + grantId + "/revoke",
+      { method: "POST" },
     ),
   approve: (id: string) =>
     request<{ approval: ApprovalRecord }>("/api/approvals/" + id + "/approve", {

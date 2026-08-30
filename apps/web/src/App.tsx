@@ -4,6 +4,7 @@ import { AgentGatePanel } from "./components/agentgate/AgentGatePanel";
 import { DemoActorSwitch } from "./components/agentgate/DemoActorSwitch";
 import type {
   Agent,
+  AgentTeamGrant,
   AgentRun,
   ApprovalRecord,
   AuditEvent,
@@ -60,8 +61,10 @@ export default function App() {
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [grants, setGrants] = useState<AgentTeamGrant[]>([]);
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
   const [revocationBusy, setRevocationBusy] = useState(false);
+  const [grantBusyId, setGrantBusyId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
@@ -96,15 +99,17 @@ export default function App() {
   }, []);
 
   const refreshGate = useCallback(async (agentId: string) => {
-    const [pendingResult, allApprovalResult, auditResult] = await Promise.all([
+    const [pendingResult, allApprovalResult, auditResult, grantResult] = await Promise.all([
       api.approvals(agentId, "pending"),
       api.approvals(agentId),
       api.audit(agentId),
+      api.teamGrants(agentId),
     ]);
     if (mountedRef.current && selectedIdRef.current === agentId) {
       setApprovals(pendingResult.approvals);
       setApprovalHistory(allApprovalResult.approvals);
       setAudit(auditResult.audit);
+      setGrants(grantResult.grants);
     }
   }, []);
 
@@ -135,6 +140,7 @@ export default function App() {
     setApprovals([]);
     setApprovalHistory([]);
     setAudit([]);
+    setGrants([]);
     if (!selectedId) {
       setMessages([]);
       return;
@@ -311,6 +317,34 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setRevocationBusy(false);
+    }
+  };
+
+  const enrollTeamGrant = async (role: "viewer" | "editor" | "admin") => {
+    if (!selected) return;
+    setGrantBusyId("enroll");
+    setError(null);
+    try {
+      await api.enrollTeamGrant(selected.id, { teamId: "team-alpha", role });
+      await refreshGate(selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setGrantBusyId(null);
+    }
+  };
+
+  const revokeTeamGrant = async (grantId: string) => {
+    if (!selected) return;
+    setGrantBusyId(grantId);
+    setError(null);
+    try {
+      await api.revokeTeamGrant(selected.id, grantId);
+      await refreshGate(selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setGrantBusyId(null);
     }
   };
 
@@ -691,6 +725,10 @@ export default function App() {
               onApprove={(approvalId) => void decideApproval(approvalId, "approve")}
               onDeny={(approvalId) => void decideApproval(approvalId, "deny")}
               onRevokeAccess={() => void revokeAccess()}
+              grants={grants}
+              grantBusyId={grantBusyId}
+              onEnrollGrant={(role) => void enrollTeamGrant(role)}
+              onRevokeGrant={(grantId) => void revokeTeamGrant(grantId)}
             />
           </>
         ) : (

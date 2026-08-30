@@ -15,8 +15,13 @@ credentials, personal data, or exploit details in an issue.
   the AgentGate proof of concept; this is not production tenant isolation or
   an enterprise IAM system.
 - Team memberships and roles are deterministic demo fixtures reseeded in the
-  local JSON store. There is no production directory, SCIM lifecycle,
-  permission-change consistency protocol, or team-administration surface.
+  local JSON store. Persistent Agent grants have a narrow demo admin surface,
+  but there is no production directory, SCIM lifecycle, externally consistent
+  permission-change protocol, or split Agent-owner/team-admin approval flow.
+- Team-file authorization intersects current human membership, persistent
+  Agent grant, Run authority, and resource threshold. Grant revocation also
+  revokes current Run authority, but this is still a single-process POC rather
+  than a distributed authorization service.
 - AgentGate protects only registered actions routed through `agentctl`; it does
   not intercept every internal Codex shell or file operation.
 - Explicit owner revocation invalidates active Run credentials and pending or

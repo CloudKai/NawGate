@@ -5,6 +5,7 @@ import type {
   DeploymentState,
   HumanId,
   ProtectedResource,
+  AgentTeamGrant,
   TeamMembership,
 } from "./agentgate/types.js";
 
@@ -55,7 +56,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 3;
+  version: 4;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -65,6 +66,7 @@ export interface Database {
   deploymentStates: DeploymentState[];
   actionExecutions: ActionExecutionRecord[];
   teamMemberships: TeamMembership[];
+  agentTeamGrants: AgentTeamGrant[];
 }
 
 export interface CreateAgentInput {

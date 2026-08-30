@@ -7,6 +7,7 @@ import type {
   PolicyInput,
   ProtectedResource,
   TeamRole,
+  AgentTeamGrant,
 } from "./types.js";
 
 const actions: readonly AgentGateAction[] = [
@@ -69,6 +70,36 @@ function isValidResourceShape(value: unknown): value is ProtectedResource {
   );
 }
 
+function isValidGrantShape(value: unknown, agentId: string): value is AgentTeamGrant {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.id) &&
+    typeof value.agentId === "string" &&
+    value.agentId === agentId &&
+    typeof value.teamId === "string" &&
+    isTeamId(value.teamId) &&
+    typeof value.role === "string" &&
+    isTeamRole(value.role) &&
+    Array.isArray(value.allowedActions) &&
+    value.allowedActions.every(isKnownAction) &&
+    (value.status === "active" || value.status === "revoked") &&
+    typeof value.approvedBy === "string" && isHumanId(value.approvedBy) &&
+    (value.expiresAt === null ||
+      (typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)))) &&
+    typeof value.bundleVersion === "number" &&
+    Number.isInteger(value.bundleVersion) &&
+    value.bundleVersion > 0 &&
+    typeof value.createdAt === "string" &&
+    Number.isFinite(Date.parse(value.createdAt)) &&
+    typeof value.updatedAt === "string" &&
+    Number.isFinite(Date.parse(value.updatedAt)) &&
+    ((value.status === "active" && value.revokedAt === null) ||
+      (value.status === "revoked" &&
+        typeof value.revokedAt === "string" &&
+        Number.isFinite(Date.parse(value.revokedAt))))
+  );
+}
+
 function isValidAttributeShape(input: unknown): input is PolicyInput {
   if (!isRecord(input)) return false;
   if (!isNonEmptyString(input.requestId)) return false;
@@ -84,11 +115,18 @@ function isValidAttributeShape(input: unknown): input is PolicyInput {
     typeof subject.humanId !== "string" ||
     !isHumanId(subject.humanId) ||
     !isNonEmptyString(subject.agentId) ||
-    !isNonEmptyString(subject.runId) ||
+    !isNonEmptyString(subject.runId)
+  ) {
+    return false;
+  }
+  const agentId = subject.agentId;
+  if (
     !Array.isArray(subject.memberships) ||
     !subject.memberships.every((membership) =>
       isValidMembership(membership, subject.humanId),
     ) ||
+    !Array.isArray(subject.agentGrants) ||
+    !subject.agentGrants.every((grant) => isValidGrantShape(grant, agentId)) ||
     !isValidResourceShape(object.resource) ||
     !isNonEmptyString(action.name) ||
     !isKnownEnvironment(environment.name)
@@ -102,7 +140,7 @@ function roleRank(role: TeamRole): number {
   return role === "admin" ? 3 : role === "editor" ? 2 : 1;
 }
 
-function teamFileDecision(input: PolicyInput): PolicyDecision {
+function teamFileDecision(input: PolicyInput, now: number): PolicyDecision {
   const resource = input.object.resource;
   if (resource.type !== "team_file" || input.action.name !== "file.read") {
     return {
@@ -153,6 +191,48 @@ function teamFileDecision(input: PolicyInput): PolicyDecision {
       reasonCode: "team_role_insufficient",
     };
   }
+  const grants = input.subject.agentGrants.filter(
+    (grant) => grant.teamId === resource.teamId,
+  );
+  if (grants.length === 0) {
+    return {
+      outcome: "deny",
+      risk: "high",
+      reasonCode: "agent_grant_missing",
+    };
+  }
+  const activeGrant = grants.find((grant) => grant.status === "active");
+  if (!activeGrant) {
+    return {
+      outcome: "deny",
+      risk: "high",
+      reasonCode: "agent_grant_revoked",
+    };
+  }
+  if (
+    activeGrant.expiresAt !== null &&
+    Date.parse(activeGrant.expiresAt) <= now
+  ) {
+    return {
+      outcome: "deny",
+      risk: "high",
+      reasonCode: "agent_grant_expired",
+    };
+  }
+  if (!activeGrant.allowedActions.includes("file.read")) {
+    return {
+      outcome: "deny",
+      risk: "high",
+      reasonCode: "agent_grant_action_under_scoped",
+    };
+  }
+  if (roleRank(activeGrant.role) < roleRank(requiredRole)) {
+    return {
+      outcome: "deny",
+      risk: "high",
+      reasonCode: "agent_grant_role_insufficient",
+    };
+  }
   return {
     outcome: "allow",
     risk: "low",
@@ -161,6 +241,8 @@ function teamFileDecision(input: PolicyInput): PolicyDecision {
 }
 
 export class DeterministicPolicyEngine implements PolicyEngine {
+  constructor(private readonly now: () => number = Date.now) {}
+
   async evaluate(input: PolicyInput): Promise<PolicyDecision> {
     if (!isRecord(input)) {
       return { outcome: "deny", risk: "high", reasonCode: "invalid_context" };
@@ -183,7 +265,7 @@ export class DeterministicPolicyEngine implements PolicyEngine {
     }
 
     if (input.object.resource.type === "team_file") {
-      return teamFileDecision(input);
+      return teamFileDecision(input, this.now());
     }
 
     // Existing user-owned resources retain their hard cross-user boundary.

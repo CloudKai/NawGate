@@ -9,6 +9,7 @@ import { ProtectedResourceService } from "./protected-resource-service.js";
 import { RuntimeGateway } from "./runtime-gateway.js";
 import { JsonStore } from "../store.js";
 import { AGENTGATE_POLICY_VERSION } from "./types.js";
+import type { AgentTeamGrant } from "./types.js";
 
 const temporaryDirectories: string[] = [];
 const context = { humanId: "user-a" as const, agentId: "agent-a", runId: "run-a" };
@@ -32,6 +33,68 @@ async function makeGateway(): Promise<{
   temporaryDirectories.push(root);
   const store = new JsonStore(path.join(root, "db.json"));
   await store.initialize();
+  const createdAt = "2026-08-30T00:00:00.000Z";
+  await store.mutate((database) => {
+    database.agents.push(
+      {
+        id: "agent-a",
+        ownerUserId: "user-a",
+        name: "Agent A",
+        description: "",
+        instructions: "",
+        status: "ready",
+        workspacePath: path.join(root, "agent-a"),
+        codexThreadId: null,
+        lastError: null,
+        createdAt,
+        updatedAt: createdAt,
+      },
+      {
+        id: "agent-b",
+        ownerUserId: "user-b",
+        name: "Agent B",
+        description: "",
+        instructions: "",
+        status: "ready",
+        workspacePath: path.join(root, "agent-b"),
+        codexThreadId: null,
+        lastError: null,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    );
+    const grants: AgentTeamGrant[] = [
+      {
+        id: "grant-agent-a-alpha",
+        agentId: "agent-a",
+        teamId: "team-alpha",
+        role: "admin",
+        allowedActions: ["file.read"],
+        status: "active",
+        approvedBy: "user-a",
+        expiresAt: null,
+        bundleVersion: 1,
+        createdAt,
+        updatedAt: createdAt,
+        revokedAt: null,
+      },
+      {
+        id: "grant-agent-b-alpha",
+        agentId: "agent-b",
+        teamId: "team-alpha",
+        role: "viewer",
+        allowedActions: ["file.read"],
+        status: "active",
+        approvedBy: "user-a",
+        expiresAt: null,
+        bundleVersion: 1,
+        createdAt,
+        updatedAt: createdAt,
+        revokedAt: null,
+      },
+    ];
+    database.agentTeamGrants.push(...grants);
+  });
   const resources = new ProtectedResourceService(store);
   const audit = new AuditService(store);
   const approvals = new ApprovalService(store, audit);
@@ -137,12 +200,184 @@ describe("RuntimeGateway", () => {
         expect.objectContaining({
           eventType: "policy.allow",
           resourceId: "team-alpha-internal",
-          policyVersion: "bouncer-v2",
+          policyVersion: AGENTGATE_POLICY_VERSION,
+          grantId: "grant-agent-a-alpha",
+          teamId: "team-alpha",
+          effectiveScope: ["file.read"],
         }),
       ]),
     );
     expect(JSON.stringify(audit.list("agent-a"))).not.toContain("Synthetic internal Team Alpha file");
     expect(JSON.stringify(store.snapshot())).not.toContain("Synthetic internal Team Alpha file");
+  });
+
+  it("denies a team-file read when the human is a member but the Agent is not enrolled", async () => {
+    const { gateway, resources, store } = await makeGateway();
+    await store.mutate((database) => {
+      database.agentTeamGrants = database.agentTeamGrants.filter(
+        (grant) => grant.agentId !== "agent-a",
+      );
+    });
+
+    const result = await gateway.execute(context, {
+      requestId: "request-alpha-no-agent-grant",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+    });
+
+    expect(result).toMatchObject({ status: "denied", reasonCode: "agent_grant_missing" });
+    expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
+  });
+
+  it("denies revoked, expired, under-scoped, and under-role grants without file execution", async () => {
+    const { gateway, resources, store } = await makeGateway();
+    const updateGrant = async (
+      update: (grant: AgentTeamGrant) => void,
+    ) => store.mutate((database) => {
+      const grant = database.agentTeamGrants.find(
+        (candidate) => candidate.id === "grant-agent-a-alpha",
+      );
+      if (!grant) throw new Error("Expected seeded Agent grant");
+      grant.status = "active";
+      grant.role = "admin";
+      grant.allowedActions = ["file.read"];
+      grant.expiresAt = null;
+      grant.revokedAt = null;
+      update(grant);
+    });
+
+    await updateGrant((grant) => {
+      grant.status = "revoked";
+      grant.revokedAt = "2026-08-30T01:00:00.000Z";
+    });
+    await expect(gateway.execute(context, {
+      requestId: "request-revoked-grant",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+    })).resolves.toMatchObject({ status: "denied", reasonCode: "agent_grant_revoked" });
+
+    await updateGrant((grant) => {
+      grant.expiresAt = "2000-01-01T00:00:00.000Z";
+    });
+    await expect(gateway.execute(context, {
+      requestId: "request-expired-grant",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+    })).resolves.toMatchObject({ status: "denied", reasonCode: "agent_grant_expired" });
+
+    await updateGrant((grant) => {
+      grant.allowedActions = [];
+    });
+    await expect(gateway.execute(context, {
+      requestId: "request-under-scoped-grant",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "agent_grant_action_under_scoped",
+    });
+
+    await updateGrant((grant) => {
+      grant.role = "viewer";
+    });
+    await expect(gateway.execute(context, {
+      requestId: "request-under-role-grant",
+      action: "file.read",
+      resourceId: "team-alpha-restricted",
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "agent_grant_role_insufficient",
+    });
+
+    expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
+    expect(resources.getExecutionCount("file.read", "team-alpha-restricted")).toBe(0);
+  });
+
+  it("rechecks a persistent Agent grant after queueing and before the protected file read", async () => {
+    const { resources, approvals, store } = await makeGateway();
+    let releaseFirst!: () => void;
+    let firstEntered!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstEnteredPromise = new Promise<void>((resolve) => {
+      firstEntered = resolve;
+    });
+    const blockingResources = {
+      getMetadata: (resourceId: string) => resources.getMetadata(resourceId),
+      execute: async (...args: Parameters<ProtectedResourceService["execute"]>) => {
+        if (args[2]?.requestId === "request-queue-blocker") {
+          firstEntered();
+          await firstBlocked;
+        }
+        return resources.execute(...args);
+      },
+    };
+    let initialTeamAllowRecorded!: () => void;
+    const initialTeamAllowPromise = new Promise<void>((resolve) => {
+      initialTeamAllowRecorded = resolve;
+    });
+    class SignallingAuditService extends AuditService {
+      override async record(input: Parameters<AuditService["record"]>[0]) {
+        const event = await super.record(input);
+        if (
+          input.requestId === "request-queued-team-read" &&
+          input.eventType === "policy.allow"
+        ) {
+          initialTeamAllowRecorded();
+        }
+        return event;
+      }
+    }
+    const audit = new SignallingAuditService(store);
+    const gateway = new RuntimeGateway(
+      new DeterministicPolicyEngine(),
+      blockingResources,
+      audit,
+      approvals,
+      store,
+    );
+
+    const blocker = gateway.execute(context, {
+      requestId: "request-queue-blocker",
+      action: "resource.read",
+      resourceId: "project-a",
+    });
+    await firstEnteredPromise;
+    const queuedRead = gateway.execute(context, {
+      requestId: "request-queued-team-read",
+      action: "file.read",
+      resourceId: "team-alpha-internal",
+    });
+    await initialTeamAllowPromise;
+    await Promise.resolve();
+    await store.mutate((database) => {
+      const grant = database.agentTeamGrants.find(
+        (candidate) => candidate.id === "grant-agent-a-alpha",
+      );
+      if (!grant) throw new Error("Expected seeded Agent grant");
+      grant.status = "revoked";
+      grant.revokedAt = "2026-08-30T01:00:00.000Z";
+      grant.updatedAt = grant.revokedAt;
+    });
+    releaseFirst();
+
+    await expect(blocker).resolves.toMatchObject({ status: "success" });
+    await expect(queuedRead).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "agent_grant_revoked",
+    });
+    expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
+    expect(audit.list("agent-a")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestId: "request-queued-team-read",
+          eventType: "policy.deny",
+          reasonCode: "agent_grant_revoked",
+          protectedActionExecuted: false,
+        }),
+      ]),
+    );
   });
 
   it("does not accept membership attributes supplied in the runtime request", async () => {

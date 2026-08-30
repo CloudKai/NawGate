@@ -19,11 +19,15 @@ that can execute a protected side effect.
 - Replays with a new request ID, expired approvals, invalid capabilities, and
   revoked Run authority fail closed without executing the protected action.
 - Every decision is redacted audit evidence. Policy decisions carry the
-  central version `bouncer-v2`, a reason explanation, and `RuntimeGateway` as
+  central version `bouncer-v3`, a reason explanation, and `RuntimeGateway` as
   the enforcement point.
-- Protected team files use backend-resolved membership relationships and role
-  thresholds. Internal files may be shared with team viewers, while restricted
-  files require an elevated team role and non-members fail closed.
+- Protected team files require the intersection of the current human team
+  relationship, a persistent administrator-approved Agent grant, the Run
+  identity, and the resource role threshold. The Agent grant survives across
+  Runs, but never replaces the short-lived per-Run identity.
+- Team-grant revocation invalidates active Run authority and pending or
+  approved capabilities. The gateway re-resolves mutable authority immediately
+  before a protected side effect, so a queued stale allow cannot execute.
 
 The Delegation Receipt in the Web UI is a safe summary of the human, Agent,
 Run, action, resource, risk, reason, policy version, timestamps, expiry, uses,

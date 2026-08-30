@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import { ApprovalError, ApprovalService } from "./agentgate/approval-service.js";
+import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
 import { AuditService } from "./agentgate/audit-service.js";
 import { IdentityService } from "./agentgate/identity-service.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
@@ -45,6 +46,12 @@ const auditQuery = z.object({
   runId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(100),
 }).strict();
+const teamGrantBody = z.object({
+  teamId: z.enum(["team-alpha", "team-beta"]),
+  role: z.enum(["viewer", "editor", "admin"]),
+  expiresAt: z.string().datetime().nullable().optional(),
+}).strict();
+const grantIdParams = z.object({ id: z.string().uuid(), grantId: z.string().uuid() });
 
 const RUNTIME_POLL_AFTER_MS = 1_000;
 
@@ -53,6 +60,7 @@ export interface RuntimeApiDependencies {
   gateway: RuntimeGateway;
   approvals: ApprovalService;
   audit: AuditService;
+  grants?: AgentTeamGrantService;
 }
 
 function runtimeContext(
@@ -228,6 +236,25 @@ export async function createApp(
   app.get("/api/demo/me", async (request) => ({ user: humanActor(request) }));
 
   if (runtime) {
+    if (runtime.grants) {
+      app.get("/api/agents/:id/team-grants", async (request) => {
+        const { id } = agentIdParams.parse(request.params);
+        return { grants: runtime.grants!.listForAgent(id, humanActor(request)) };
+      });
+
+      app.post("/api/agents/:id/team-grants", async (request, reply) => {
+        const { id } = agentIdParams.parse(request.params);
+        const body = teamGrantBody.parse(request.body);
+        const grant = await runtime.grants!.enroll(id, body, humanActor(request));
+        return reply.code(201).send({ grant });
+      });
+
+      app.post("/api/agents/:id/team-grants/:grantId/revoke", async (request) => {
+        const { id, grantId } = grantIdParams.parse(request.params);
+        return { result: await runtime.grants!.revoke(id, grantId, humanActor(request)) };
+      });
+    }
+
     app.get("/api/agents/:id/approvals", async (request) => {
       const { id } = agentIdParams.parse(request.params);
       const query = approvalQuery.parse(request.query);

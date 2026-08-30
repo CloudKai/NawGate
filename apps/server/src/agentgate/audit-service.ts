@@ -7,6 +7,7 @@ import type {
   AuditRisk,
   AuditStatus,
   HumanId,
+  TeamId,
 } from "./types.js";
 import { AGENTGATE_POLICY_VERSION } from "./types.js";
 import { JsonStore } from "../store.js";
@@ -30,6 +31,10 @@ export interface AuditEventInput {
   explanation?: string | null;
   enforcementPoint?: string | null;
   protectedActionExecuted?: boolean | null;
+  grantId?: string | null;
+  teamId?: TeamId | null;
+  bundleVersion?: number | null;
+  effectiveScope?: string[] | null;
 }
 
 export class AuditService {
@@ -60,6 +65,10 @@ export class AuditService {
       explanation: input.explanation ?? null,
       enforcementPoint: input.enforcementPoint ?? null,
       protectedActionExecuted: input.protectedActionExecuted ?? null,
+      grantId: input.grantId ?? null,
+      teamId: input.teamId ?? null,
+      bundleVersion: input.bundleVersion ?? null,
+      effectiveScope: input.effectiveScope ?? null,
     };
     await this.store.mutate((database) => {
       database.auditEvents.push(event);

@@ -26,10 +26,20 @@ Open `http://localhost:3000` and use the side panel:
 
 The receipt is evidence only: it contains metadata and status, never secrets.
 
-## Optional team-file extension
+## Persistent Team Agent extension
 
 Keep the core Bouncer story above within three minutes. If a judge asks about
-production team permissions, use a User A Agent and a User B Agent to show:
+production team permissions, select a User A Agent and use the **Persistent
+Team Agent enrollment** card:
+
+1. Enroll the Agent in Team Alpha as `viewer`.
+2. Run the internal and restricted reads below. The internal read succeeds,
+   while the restricted read fails because the Agent grant is under-role even
+   though User A is a team admin.
+3. Revoke the enrollment and retry the internal read. It fails closed with
+   `agent_grant_revoked` and no protected read executes.
+4. Re-enroll as `editor`. The new bundle version can read both Alpha files and
+   the audit timeline identifies the exact grant and effective scope.
 
 ```bash
 agentctl file read team-alpha-internal
@@ -37,11 +47,12 @@ agentctl file read team-alpha-restricted
 agentctl file read team-beta-internal
 ```
 
-- User A is Team Alpha admin and can read the internal and restricted Alpha
-  files.
-- User B is Team Alpha viewer and can read the internal Alpha file but is
-  denied the restricted Alpha file.
-- User A is not a Team Beta member and is denied the Beta file.
+- User A is not a Team Beta member, so the Beta file remains denied regardless
+  of the Alpha Agent grant.
+- User B's Team Alpha human membership alone is insufficient: User B is not an
+  Alpha admin and cannot self-enroll an Agent in this demo.
+- The persistent grant survives Run completion, while every new Run still
+  requires its own short-lived runtime identity.
 
 The audit timeline should retain the registered file identifier and policy
 reason while never containing the synthetic file payload.

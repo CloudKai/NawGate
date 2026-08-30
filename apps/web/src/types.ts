@@ -45,6 +45,21 @@ export interface AgentRun {
   createdAt: string;
 }
 
+export interface AgentTeamGrant {
+  id: string;
+  agentId: string;
+  teamId: "team-alpha" | "team-beta";
+  role: "viewer" | "editor" | "admin";
+  allowedActions: ("resource.read" | "file.read" | "deploy.staging" | "deploy.production")[];
+  status: "active" | "revoked";
+  approvedBy: HumanId;
+  expiresAt: string | null;
+  bundleVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+}
+
 export interface SystemInfo {
   modelProvider: "ark" | "openai-compatible";
   modelConfigured: boolean;
@@ -97,4 +112,8 @@ export interface AuditEvent {
   explanation: string | null;
   enforcementPoint: string | null;
   protectedActionExecuted: boolean | null;
+  grantId: string | null;
+  teamId: "team-alpha" | "team-beta" | null;
+  bundleVersion: number | null;
+  effectiveScope: string[] | null;
 }

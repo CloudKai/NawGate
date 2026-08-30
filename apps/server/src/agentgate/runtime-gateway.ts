@@ -4,11 +4,13 @@ import {
   type ApprovalRequest,
 } from "./approval-service.js";
 import { AuditService } from "./audit-service.js";
-import { isHumanId } from "./demo-users.js";
+import { AgentTeamGrantService, type AgentGrantResolver } from "./agent-team-grant-service.js";
+import { isHumanId, isTeamId } from "./demo-users.js";
 import { TeamMembershipService, type MembershipResolver } from "./team-membership-service.js";
 import type { JsonStore } from "../store.js";
 import type {
   ActionExecutionRecord,
+  AgentTeamGrant,
   AgentGateAction,
   AuditDecision,
   GatewayRequest,
@@ -18,6 +20,7 @@ import type {
   ProtectedActionResult,
   ProtectedResource,
   TrustedRuntimeContext,
+  TeamId,
 } from "./types.js";
 import { AGENTGATE_POLICY_VERSION } from "./types.js";
 
@@ -28,6 +31,10 @@ interface ProtectedResourceBoundary {
     resourceId: string,
     execution?: { runId: string; requestId: string },
   ): Promise<ProtectedActionResult>;
+}
+
+export interface RuntimeAuthorityResolver {
+  isAuthorityActive(context: TrustedRuntimeContext): boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,6 +128,24 @@ function explanationFor(
   if (reasonCode === "team_role_insufficient") {
     return "The acting human's trusted team role is below the protected file's minimum role.";
   }
+  if (reasonCode === "agent_grant_missing") {
+    return "This Agent has not been explicitly enrolled in the protected file's team.";
+  }
+  if (reasonCode === "agent_grant_revoked") {
+    return "This Agent's persistent team grant was revoked.";
+  }
+  if (reasonCode === "agent_grant_expired") {
+    return "This Agent's persistent team grant has expired.";
+  }
+  if (reasonCode === "agent_grant_action_under_scoped") {
+    return "This Agent's team grant does not include the requested registered action.";
+  }
+  if (reasonCode === "agent_grant_role_insufficient") {
+    return "This Agent's team grant role is below the protected file's minimum role.";
+  }
+  if (reasonCode === "runtime_authority_revoked") {
+    return "The Run authority is no longer active; the protected action was not executed.";
+  }
   if (reasonCode === "malformed_attributes") {
     return "The subject, object, action, or environment attributes were malformed.";
   }
@@ -143,6 +168,8 @@ export class RuntimeGateway {
     private readonly approvals: ApprovalService,
     private readonly store: JsonStore,
     private readonly memberships: MembershipResolver = new TeamMembershipService(store),
+    private readonly grants: AgentGrantResolver = new AgentTeamGrantService(store),
+    private readonly authority?: RuntimeAuthorityResolver,
   ) {}
 
   async execute(
@@ -189,6 +216,24 @@ export class RuntimeGateway {
       };
     }
 
+    if (this.authority && !this.authority.isAuthorityActive(context)) {
+      await this.recordPolicyDecision(
+        context,
+        request,
+        null,
+        { outcome: "deny", risk: "high", reasonCode: "runtime_authority_revoked" },
+        startedAt,
+        [],
+      );
+      return {
+        status: "denied",
+        requestId: request.requestId,
+        action: request.action,
+        resourceId: request.resourceId,
+        reasonCode: "runtime_authority_revoked",
+      };
+    }
+
     const resource = this.resources.getMetadata(request.resourceId);
     if (!resource) {
       await this.recordPolicyDecision(
@@ -210,6 +255,7 @@ export class RuntimeGateway {
     // The request cannot supply roles. Resolve relationship tuples from the
     // trusted server store at the enforcement boundary before policy runs.
     const memberships = this.memberships.resolveMemberships(context.humanId);
+    const grants = this.grants.resolveGrants(context.agentId);
     const decision = await this.policy.evaluate({
       requestId: request.requestId,
       subject: {
@@ -217,12 +263,13 @@ export class RuntimeGateway {
         agentId: context.agentId,
         runId: context.runId,
         memberships,
+        agentGrants: grants,
       },
       object: { resource },
       action: { name: request.action },
       environment: { name: environmentFor(request.action) },
     });
-    await this.recordPolicyDecision(context, request, resource, decision, startedAt);
+    await this.recordPolicyDecision(context, request, resource, decision, startedAt, grants);
 
     if (decision.outcome === "deny") {
       return {
@@ -252,7 +299,79 @@ export class RuntimeGateway {
         return this.replayExecution(existing);
       }
 
-      if (decision.outcome === "require_approval") {
+      // The initial decision may have waited behind another protected action.
+      // Re-resolve every mutable authorization input immediately before any
+      // approval consumption or protected side effect.
+      const finalResource = this.resources.getMetadata(request.resourceId);
+      const finalGrants = this.grants.resolveGrants(context.agentId);
+      const finalMemberships = this.memberships.resolveMemberships(context.humanId);
+      if (this.authority && !this.authority.isAuthorityActive(context)) {
+        await this.recordPolicyDecision(
+          context,
+          request,
+          finalResource,
+          { outcome: "deny", risk: "high", reasonCode: "runtime_authority_revoked" },
+          startedAt,
+          finalGrants,
+        );
+        return {
+          status: "denied",
+          requestId: request.requestId,
+          action: request.action,
+          resourceId: request.resourceId,
+          reasonCode: "runtime_authority_revoked",
+        };
+      }
+      if (!finalResource) {
+        await this.recordPolicyDecision(
+          context,
+          request,
+          null,
+          { outcome: "deny", risk: "high", reasonCode: "unknown_resource" },
+          startedAt,
+          finalGrants,
+        );
+        return {
+          status: "denied",
+          requestId: request.requestId,
+          action: request.action,
+          resourceId: "unknown",
+          reasonCode: "unknown_resource",
+        };
+      }
+      const finalDecision = await this.policy.evaluate({
+        requestId: request.requestId,
+        subject: {
+          humanId: context.humanId,
+          agentId: context.agentId,
+          runId: context.runId,
+          memberships: finalMemberships,
+          agentGrants: finalGrants,
+        },
+        object: { resource: finalResource },
+        action: { name: request.action },
+        environment: { name: environmentFor(request.action) },
+      });
+      if (finalDecision.outcome === "deny") {
+        await this.recordPolicyDecision(
+          context,
+          request,
+          finalResource,
+          finalDecision,
+          startedAt,
+          finalGrants,
+        );
+        return {
+          status: "denied",
+          requestId: request.requestId,
+          action: request.action,
+          resourceId: request.resourceId,
+          reasonCode: finalDecision.reasonCode,
+        };
+      }
+      const currentDecision = finalDecision;
+
+      if (currentDecision.outcome === "require_approval") {
         const approvalRequest: ApprovalRequest = {
           humanId: context.humanId,
           agentId: context.agentId,
@@ -260,7 +379,8 @@ export class RuntimeGateway {
           requestId: request.requestId,
           action: request.action,
           resourceId: request.resourceId,
-          reasonCode: decision.reasonCode,
+          reasonCode: currentDecision.reasonCode,
+          ...this.grantEvidence(finalResource, finalGrants),
         };
         if (!request.approvalId) {
           try {
@@ -289,8 +409,8 @@ export class RuntimeGateway {
               action: request.action,
               resourceId: request.resourceId,
               approvalId: approval.id,
-              risk: decision.risk,
-              reasonCode: decision.reasonCode,
+              risk: currentDecision.risk,
+              reasonCode: currentDecision.reasonCode,
             };
           } catch (error) {
             if (error instanceof ApprovalError && error.code === "IDEMPOTENCY_MISMATCH") {
@@ -317,8 +437,8 @@ export class RuntimeGateway {
             action: request.action,
             resourceId: request.resourceId,
             approvalId: consumption.approval.id,
-            risk: decision.risk,
-            reasonCode: decision.reasonCode,
+            risk: currentDecision.risk,
+            reasonCode: currentDecision.reasonCode,
           };
         }
         if (consumption.status === "denied") {
@@ -331,16 +451,17 @@ export class RuntimeGateway {
             action: request.action,
             resourceId: request.resourceId,
             decision: "deny",
-            risk: decision.risk,
+            risk: currentDecision.risk,
             reasonCode: consumption.reasonCode,
             approvalId: request.approvalId,
             capabilityId: null,
             status: "failure",
             durationMs: Date.now() - startedAt,
             policyVersion: AGENTGATE_POLICY_VERSION,
-            explanation: explanationFor(context, request, resource, consumption.reasonCode),
+            explanation: explanationFor(context, request, finalResource, consumption.reasonCode),
             enforcementPoint: "RuntimeGateway",
             protectedActionExecuted: false,
+            ...this.grantEvidence(finalResource, finalGrants),
           });
           return {
             status: "denied",
@@ -362,6 +483,56 @@ export class RuntimeGateway {
     request: GatewayRequest,
     startedAt: number,
   ): Promise<GatewayResult> {
+    // This is intentionally a second policy boundary immediately adjacent to
+    // the side effect. The earlier decision may have waited on the execution
+    // queue or consumed an approval while mutable membership/grant state
+    // changed. A stale allow is never sufficient to read a protected file.
+    const resource = this.resources.getMetadata(request.resourceId);
+    const grants = this.grants.resolveGrants(context.agentId);
+    const memberships = this.memberships.resolveMemberships(context.humanId);
+    if (this.authority && !this.authority.isAuthorityActive(context)) {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        resource,
+        grants,
+        { outcome: "deny", risk: "high", reasonCode: "runtime_authority_revoked" },
+        startedAt,
+      );
+    }
+    if (!resource) {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        null,
+        grants,
+        { outcome: "deny", risk: "high", reasonCode: "unknown_resource" },
+        startedAt,
+      );
+    }
+    const finalDecision = await this.policy.evaluate({
+      requestId: request.requestId,
+      subject: {
+        humanId: context.humanId,
+        agentId: context.agentId,
+        runId: context.runId,
+        memberships,
+        agentGrants: grants,
+      },
+      object: { resource },
+      action: { name: request.action },
+      environment: { name: environmentFor(request.action) },
+    });
+    if (finalDecision.outcome === "deny") {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        resource,
+        grants,
+        finalDecision,
+        startedAt,
+      );
+    }
     try {
       const result = await this.resources.execute(request.action, request.resourceId, {
         runId: context.runId,
@@ -386,6 +557,7 @@ export class RuntimeGateway {
         explanation: "The RuntimeGateway authorized and completed the protected action.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: true,
+        ...this.grantEvidence(resource, grants),
       });
       return {
         status: "success",
@@ -425,6 +597,7 @@ export class RuntimeGateway {
         explanation: "Authorization passed, but the protected action failed during execution.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: false,
+        ...this.grantEvidence(resource, grants),
       });
       return {
         status: "failed",
@@ -434,6 +607,24 @@ export class RuntimeGateway {
         reasonCode: "protected_action_failed",
       };
     }
+  }
+
+  private async deniedAfterFinalRecheck(
+    context: TrustedRuntimeContext,
+    request: GatewayRequest,
+    resource: ProtectedResource | null,
+    grants: readonly AgentTeamGrant[],
+    decision: Extract<PolicyDecision, { outcome: "deny" }>,
+    startedAt: number,
+  ): Promise<GatewayResult> {
+    await this.recordPolicyDecision(context, request, resource, decision, startedAt, grants);
+    return {
+      status: "denied",
+      requestId: request.requestId,
+      action: request.action,
+      resourceId: request.resourceId,
+      reasonCode: decision.reasonCode,
+    };
   }
 
   private findExecution(runId: string, requestId: string): ActionExecutionRecord | null {
@@ -477,6 +668,7 @@ export class RuntimeGateway {
     resource: ProtectedResource | null,
     decision: PolicyDecision,
     startedAt: number,
+    grants: readonly AgentTeamGrant[] = [],
   ): Promise<void> {
     await this.audit.record({
       eventType:
@@ -507,7 +699,31 @@ export class RuntimeGateway {
       explanation: explanationFor(context, request, resource, decision.reasonCode),
       enforcementPoint: "RuntimeGateway",
       protectedActionExecuted: false,
+      ...this.grantEvidence(resource, grants),
     });
+  }
+
+  private grantEvidence(
+    resource: ProtectedResource | null,
+    grants: readonly AgentTeamGrant[],
+  ): {
+    grantId: string | null;
+    teamId: TeamId | null;
+    bundleVersion: number | null;
+    effectiveScope: string[] | null;
+  } {
+    if (!resource || resource.type !== "team_file" || !isTeamId(resource.teamId)) {
+      return { grantId: null, teamId: null, bundleVersion: null, effectiveScope: null };
+    }
+    const grant = grants
+      .filter((candidate) => candidate.teamId === resource.teamId)
+      .sort((left, right) => right.bundleVersion - left.bundleVersion)[0];
+    return {
+      grantId: grant?.id ?? null,
+      teamId: resource.teamId,
+      bundleVersion: grant?.bundleVersion ?? null,
+      effectiveScope: grant ? [...grant.allowedActions] : null,
+    };
   }
 
   private async serializeExecution<T>(operation: () => Promise<T>): Promise<T> {

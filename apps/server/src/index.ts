@@ -1,6 +1,7 @@
 import path from "node:path";
 import { AgentService } from "./agent-service.js";
 import { ApprovalService } from "./agentgate/approval-service.js";
+import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
 import { AuditService } from "./agentgate/audit-service.js";
 import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
 import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
@@ -21,6 +22,7 @@ const workspaces = new WorkspaceManager(config.workspaceRoot);
 const audit = new AuditService(store);
 const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const approvals = new ApprovalService(store, audit);
+const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
 const resources = new ProtectedResourceService(store);
 const gateway = new RuntimeGateway(
   new DeterministicPolicyEngine(),
@@ -28,6 +30,9 @@ const gateway = new RuntimeGateway(
   audit,
   approvals,
   store,
+  undefined,
+  grants,
+  credentials,
 );
 const runner = createRunner(config, store, { credentials, audit });
 const identity = new IdentityService();
@@ -39,6 +44,7 @@ const app = await createApp(config, service, identity, {
   gateway,
   approvals,
   audit,
+  grants,
 });
 
 const shutdown = async (signal: string) => {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApprovalService } from "./agentgate/approval-service.js";
+import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
 import { AuditService } from "./agentgate/audit-service.js";
 import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
 import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
@@ -16,6 +17,9 @@ import { JsonStore } from "./store.js";
 
 const temporaryDirectories: string[] = [];
 const applications: { close: () => Promise<unknown> }[] = [];
+const agentAId = "00000000-0000-4000-8000-000000000001";
+const runAId = "00000000-0000-4000-8000-000000000002";
+const agentBId = "00000000-0000-4000-8000-000000000003";
 const service = {
   listAgents: () => [],
   systemInfo: async () => ({}),
@@ -24,8 +28,8 @@ const service = {
     return { ownerUserId: "user-a" };
   },
   getActiveRun: () => ({
-    id: "00000000-0000-4000-8000-000000000002",
-    agentId: "00000000-0000-4000-8000-000000000001",
+    id: runAId,
+    agentId: agentAId,
     status: "running",
   }),
 } as unknown as AgentService;
@@ -43,25 +47,63 @@ async function makeRuntimeApp(): Promise<{
   app: Awaited<ReturnType<typeof createApp>>;
   runtime: RuntimeApiDependencies;
   resources: ProtectedResourceService;
+  store: JsonStore;
+  grants: AgentTeamGrantService;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), "agentgate-runtime-api-test-"));
   temporaryDirectories.push(root);
   const store = new JsonStore(path.join(root, "db.json"));
   await store.initialize();
+  const timestamp = "2026-08-30T00:00:00.000Z";
+  await store.mutate((database) => {
+    database.agents.push(
+      {
+        id: agentAId,
+        ownerUserId: "user-a",
+        name: "Agent A",
+        description: "",
+        instructions: "",
+        status: "ready",
+        workspacePath: path.join(root, "agent-a"),
+        codexThreadId: null,
+        lastError: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      {
+        id: agentBId,
+        ownerUserId: "user-b",
+        name: "Agent B",
+        description: "",
+        instructions: "",
+        status: "ready",
+        workspacePath: path.join(root, "agent-b"),
+        codexThreadId: null,
+        lastError: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    );
+  });
   const audit = new AuditService(store);
   const approvals = new ApprovalService(store, audit);
   const resources = new ProtectedResourceService(store);
   const credentials = new RuntimeCredentialService();
+  const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
   const runtime: RuntimeApiDependencies = {
     credentials,
     approvals,
     audit,
+    grants,
     gateway: new RuntimeGateway(
       new DeterministicPolicyEngine(),
       resources,
       audit,
       approvals,
       store,
+      undefined,
+      grants,
+      credentials,
     ),
   };
   const app = await createApp(
@@ -71,7 +113,7 @@ async function makeRuntimeApp(): Promise<{
     runtime,
   );
   applications.push(app);
-  return { app, runtime, resources };
+  return { app, runtime, resources, store, grants };
 }
 
 function runtimeHeaders(token: string) {
@@ -226,8 +268,13 @@ describe("Runtime API boundary", () => {
   });
 
   it("routes team-file reads through the runtime credential and rejects the wrong team", async () => {
-    const { app, runtime, resources } = await makeRuntimeApp();
-    const viewer = runtime.credentials.issue("agent-b", "run-team-b", "user-b");
+    const { app, runtime, resources, grants } = await makeRuntimeApp();
+    await grants.enroll(
+      agentAId,
+      { teamId: "team-alpha", role: "viewer" },
+      { id: "user-a", name: "User A" },
+    );
+    const viewer = runtime.credentials.issue(agentAId, "run-team-a", "user-a");
     const internal = await app.inject({
       method: "POST",
       url: "/api/runtime/actions",
@@ -246,10 +293,26 @@ describe("Runtime API boundary", () => {
       result: { content: "Synthetic internal Team Alpha file." },
     });
 
+    const restricted = await app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: runtimeHeaders(viewer.token),
+      payload: {
+        requestId: "af4e5d3c-2b1a-4908-8765-43210fedcba9",
+        action: "file.read",
+        resourceId: "team-alpha-restricted",
+      },
+    });
+    expect(restricted.statusCode).toBe(403);
+    expect(restricted.json()).toMatchObject({
+      status: "denied",
+      reasonCode: "agent_grant_role_insufficient",
+    });
+
     const wrongTeam = await app.inject({
       method: "POST",
       url: "/api/runtime/actions",
-      headers: runtimeHeaders(runtime.credentials.issue("agent-a", "run-team-a", "user-a").token),
+      headers: runtimeHeaders(viewer.token),
       payload: {
         requestId: "7f4e5d3c-2b1a-4908-8765-43210fedcba9",
         action: "file.read",
@@ -264,11 +327,91 @@ describe("Runtime API boundary", () => {
     expect(resources.getExecutionCount("file.read", "team-beta-internal")).toBe(0);
   });
 
+  it("exposes team-grant enrollment and revocation only to the owner team admin", async () => {
+    const { app } = await makeRuntimeApp();
+    const authHeaders = { authorization: "Bearer outer-token-for-tests" };
+    const actorASession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-a" },
+    });
+    const actorAToken = (actorASession.json() as { sessionToken: string }).sessionToken;
+    const actorAHeaders = { ...authHeaders, "x-agentgate-session": actorAToken };
+
+    const enrolled = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/team-grants`,
+      headers: actorAHeaders,
+      payload: { teamId: "team-alpha", role: "editor" },
+    });
+    expect(enrolled.statusCode).toBe(201);
+    expect(enrolled.json()).toMatchObject({
+      grant: {
+        agentId: agentAId,
+        teamId: "team-alpha",
+        role: "editor",
+        allowedActions: ["file.read"],
+        status: "active",
+      },
+    });
+    const grantId = (enrolled.json() as { grant: { id: string } }).grant.id;
+
+    const listed = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentAId}/team-grants`,
+      headers: actorAHeaders,
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toMatchObject({ grants: [{ id: grantId, status: "active" }] });
+
+    const malformed = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/team-grants`,
+      headers: actorAHeaders,
+      payload: { teamId: "team-alpha", role: "owner" },
+    });
+    expect(malformed.statusCode).toBe(400);
+
+    const actorBSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-b" },
+    });
+    const actorBToken = (actorBSession.json() as { sessionToken: string }).sessionToken;
+    const actorBHeaders = { ...authHeaders, "x-agentgate-session": actorBToken };
+    const crossOwner = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentAId}/team-grants`,
+      headers: actorBHeaders,
+    });
+    expect(crossOwner.statusCode).toBe(404);
+    const nonAdmin = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentBId}/team-grants`,
+      headers: actorBHeaders,
+      payload: { teamId: "team-alpha", role: "viewer" },
+    });
+    expect(nonAdmin.statusCode).toBe(403);
+    expect(nonAdmin.json()).toMatchObject({ code: "TEAM_ADMIN_REQUIRED" });
+
+    const revoked = await app.inject({
+      method: "POST",
+      url: `/api/agents/${agentAId}/team-grants/${grantId}/revoke`,
+      headers: actorAHeaders,
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({
+      result: { grant: { id: grantId, status: "revoked" }, runsRevoked: 0 },
+    });
+  });
+
   it("revokes an active Run and fails closed for its old runtime credential", async () => {
     const { app, runtime } = await makeRuntimeApp();
     const issued = runtime.credentials.issue(
-      "00000000-0000-4000-8000-000000000001",
-      "00000000-0000-4000-8000-000000000002",
+      agentAId,
+      runAId,
       "user-a",
     );
     const session = await app.inject({
@@ -281,7 +424,7 @@ describe("Runtime API boundary", () => {
 
     const revoked = await app.inject({
       method: "POST",
-      url: "/api/agents/00000000-0000-4000-8000-000000000001/revoke-access",
+      url: `/api/agents/${agentAId}/revoke-access`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
         "x-agentgate-session": sessionToken,
@@ -306,7 +449,7 @@ describe("Runtime API boundary", () => {
 
   it("exposes approvals and audit only through the current human owner", async () => {
     const { app, runtime } = await makeRuntimeApp();
-    const agentId = "00000000-0000-4000-8000-000000000001";
+    const agentId = agentAId;
     const issued = runtime.credentials.issue(agentId, "run-human-api", "user-a");
     const requestId = "de4a7b20-f047-4d9b-a5c7-69b693b67f61";
     const pending = await runtime.gateway.execute(

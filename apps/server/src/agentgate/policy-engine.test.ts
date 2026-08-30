@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { DeterministicPolicyEngine } from "./policy-engine.js";
-import type { PolicyInput, ProtectedResource, TeamMembership } from "./types.js";
+import type {
+  AgentTeamGrant,
+  PolicyInput,
+  ProtectedResource,
+  TeamMembership,
+} from "./types.js";
+
+const alphaGrant: AgentTeamGrant = {
+  id: "grant-alpha",
+  agentId: "agent-a",
+  teamId: "team-alpha",
+  role: "admin",
+  allowedActions: ["file.read"],
+  status: "active",
+  approvedBy: "user-a",
+  expiresAt: null,
+  bundleVersion: 1,
+  createdAt: "2026-08-30T00:00:00.000Z",
+  updatedAt: "2026-08-30T00:00:00.000Z",
+  revokedAt: null,
+};
 
 const projectA: ProtectedResource = {
   id: "project-a",
@@ -31,10 +51,11 @@ function input(
   action = "resource.read",
   memberships: readonly TeamMembership[] = [],
   environment: "local" | "staging" | "production" = "local",
+  agentGrants: readonly AgentTeamGrant[] = [alphaGrant],
 ): PolicyInput {
   return {
     requestId: "request-a",
-    subject: { humanId, agentId: "agent-a", runId: "run-a", memberships },
+    subject: { humanId, agentId: "agent-a", runId: "run-a", memberships, agentGrants },
     object: { resource },
     action: { name: action },
     environment: { name: environment },
@@ -42,7 +63,8 @@ function input(
 }
 
 describe("DeterministicPolicyEngine", () => {
-  const policy = new DeterministicPolicyEngine();
+  const now = Date.parse("2026-08-30T12:00:00.000Z");
+  const policy = new DeterministicPolicyEngine(() => now);
 
   it("allows an owner to read their project profile", async () => {
     await expect(policy.evaluate(input())).resolves.toEqual({
@@ -110,6 +132,64 @@ describe("DeterministicPolicyEngine", () => {
     }, "file.read"))).resolves.toMatchObject({
       outcome: "deny",
       reasonCode: "team_membership_missing",
+    });
+  });
+
+  it("fails closed for missing, revoked, expired, and under-scoped Agent grants", async () => {
+    const adminMembership: TeamMembership[] = [
+      { teamId: "team-alpha", humanId: "user-a", role: "admin" },
+    ];
+    await expect(
+      policy.evaluate(input("user-a", alphaInternal, "file.read", adminMembership, "local", [])),
+    ).resolves.toMatchObject({ outcome: "deny", reasonCode: "agent_grant_missing" });
+    await expect(
+      policy.evaluate(input(
+        "user-a",
+        alphaInternal,
+        "file.read",
+        adminMembership,
+        "local",
+        [{ ...alphaGrant, status: "revoked", revokedAt: "2026-08-30T11:00:00.000Z" }],
+      )),
+    ).resolves.toMatchObject({ outcome: "deny", reasonCode: "agent_grant_revoked" });
+    await expect(
+      policy.evaluate(input(
+        "user-a",
+        alphaInternal,
+        "file.read",
+        adminMembership,
+        "local",
+        [{ ...alphaGrant, expiresAt: "2026-08-30T11:59:59.000Z" }],
+      )),
+    ).resolves.toMatchObject({ outcome: "deny", reasonCode: "agent_grant_expired" });
+    await expect(
+      policy.evaluate(input(
+        "user-a",
+        alphaInternal,
+        "file.read",
+        adminMembership,
+        "local",
+        [{ ...alphaGrant, allowedActions: [] }],
+      )),
+    ).resolves.toMatchObject({
+      outcome: "deny",
+      reasonCode: "agent_grant_action_under_scoped",
+    });
+  });
+
+  it("intersects the human role with the persistent Agent grant role", async () => {
+    await expect(
+      policy.evaluate(input(
+        "user-a",
+        alphaRestricted,
+        "file.read",
+        [{ teamId: "team-alpha", humanId: "user-a", role: "admin" }],
+        "local",
+        [{ ...alphaGrant, role: "viewer" }],
+      )),
+    ).resolves.toMatchObject({
+      outcome: "deny",
+      reasonCode: "agent_grant_role_insufficient",
     });
   });
 

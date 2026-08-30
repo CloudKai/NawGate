@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AuditService } from "./audit-service.js";
-import { AGENTGATE_POLICY_VERSION, type ApprovalRecord, type AgentGateAction, type CapabilityLease, type HumanId } from "./types.js";
+import { AGENTGATE_POLICY_VERSION, type ApprovalRecord, type AgentGateAction, type CapabilityLease, type HumanId, type TeamId } from "./types.js";
 import { JsonStore } from "../store.js";
 
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1_000;
@@ -13,6 +13,10 @@ export interface ApprovalRequest {
   action: AgentGateAction;
   resourceId: string;
   reasonCode: string;
+  grantId?: string | null;
+  teamId?: TeamId | null;
+  bundleVersion?: number | null;
+  effectiveScope?: string[] | null;
 }
 
 export type CapabilityConsumption =
@@ -49,7 +53,10 @@ function sameRequest(left: ApprovalRequest, right: ApprovalRecord): boolean {
     left.runId === right.runId &&
     left.requestId === right.requestId &&
     left.action === right.action &&
-    left.resourceId === right.resourceId
+    left.resourceId === right.resourceId &&
+    (left.grantId ?? null) === (right.grantId ?? null) &&
+    (left.teamId ?? null) === (right.teamId ?? null) &&
+    (left.bundleVersion ?? null) === (right.bundleVersion ?? null)
   );
 }
 
@@ -118,6 +125,10 @@ export class ApprovalService {
         createdAt,
         decidedAt: null,
         expiresAt: new Date(this.now() + this.ttlMs).toISOString(),
+        ...(request.grantId ? { grantId: request.grantId } : {}),
+        ...(request.teamId ? { teamId: request.teamId } : {}),
+        ...(request.bundleVersion ? { bundleVersion: request.bundleVersion } : {}),
+        ...(request.effectiveScope ? { effectiveScope: [...request.effectiveScope] } : {}),
       };
       database.approvals.push(next);
       return structuredClone(next);
@@ -201,6 +212,10 @@ export class ApprovalService {
         issuedAt,
         expiresAt: new Date(this.now() + this.ttlMs).toISOString(),
         remainingUses: 1,
+        ...(approval.grantId ? { grantId: approval.grantId } : {}),
+        ...(approval.teamId ? { teamId: approval.teamId } : {}),
+        ...(approval.bundleVersion ? { bundleVersion: approval.bundleVersion } : {}),
+        ...(approval.effectiveScope ? { effectiveScope: [...approval.effectiveScope] } : {}),
       };
       approval.status = "approved";
       approval.decidedAt = issuedAt;

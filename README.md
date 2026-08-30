@@ -29,7 +29,8 @@ Volcengine ECS.
 - Fastify control plane with asynchronous Run state
 - Persistent Agent workspaces and Codex sessions
 - AgentGate identity, ownership, approval, one-use capability, and redacted audit evidence
-- Team-scoped protected file reads with backend-resolved membership and role checks
+- Persistent Team Agent grants intersected with human membership, Run identity,
+  resource role thresholds, and final pre-execution rechecks
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -41,9 +42,10 @@ relationship, and only the RuntimeGateway can invoke a registered protected
 action. User A can read `project-a`; User B's resource is denied. Production
 deploy requires owner approval, produces a one-use capability, and leaves a
 redacted audit trail. Owner revocation invalidates the active Run identity and
-its capabilities. A standards-informed extension allows internal team files to
-be shared with viewers while restricted files require a stronger team role;
-the Runtime cannot assert its own membership. See the
+its capabilities. A standards-informed extension lets a team admin persistently
+enroll an owned Agent with a narrow file-read role. Human membership, Agent
+grant, Run identity, and resource threshold must all agree; the Runtime cannot
+assert any of them. See the
 [AgentGate overview](docs/agentgate/overview.md),
 [standards alignment](docs/agentgate/standards.md), and
 [three-minute demo](docs/agentgate/demo.md).
@@ -141,8 +143,10 @@ Runtime for the protected-action demo. Normal coding Runs continue to work in
 either provider.
 
 The Web UI also exposes a **Delegation receipt** for the latest approval and a
-**Revoke access** control while a Run is active. These controls show safe
-metadata and status only; they do not expose credentials or protected payloads.
+**Revoke access** control while a Run is active. For User A's Team Alpha admin
+fixture, it also exposes persistent Agent enrollment and revocation. These
+controls show safe metadata and status only; they do not expose credentials or
+protected payloads.
 
 ### 5. Stop and resume
 

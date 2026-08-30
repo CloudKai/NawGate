@@ -120,10 +120,18 @@ export class AgentService {
     const agent = this.getAgent(id, actor);
     await this.cancelExecution(id);
     const archivedWorkspace = await this.workspaces.archive(agent);
+    const deletedAt = now();
     await this.store.mutate((database) => {
       database.agents = database.agents.filter((item) => item.id !== id);
       database.messages = database.messages.filter((item) => item.agentId !== id);
       database.runs = database.runs.filter((item) => item.agentId !== id);
+      for (const grant of database.agentTeamGrants) {
+        if (grant.agentId === id && grant.status === "active") {
+          grant.status = "revoked";
+          grant.revokedAt = deletedAt;
+          grant.updatedAt = deletedAt;
+        }
+      }
     });
     return { archivedWorkspace };
   }

@@ -93,6 +93,21 @@ export class RuntimeCredentialService {
     return this.revokedRunIds.has(runId);
   }
 
+  isAuthorityActive(context: TrustedRuntimeContext): boolean {
+    if (this.revokedRunIds.has(context.runId)) return false;
+    for (const record of this.credentials.values()) {
+      if (
+        record.context.runId === context.runId &&
+        record.context.agentId === context.agentId &&
+        record.context.humanId === context.humanId &&
+        record.expiresAt > this.now()
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   activeCount(): number {
     return this.credentials.size;
   }

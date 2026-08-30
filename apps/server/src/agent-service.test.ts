@@ -68,8 +68,28 @@ describe("Agent lifecycle", () => {
       .toBe("Builds apps");
     expect((await service.stopAgent(agent.id, userA)).status).toBe("stopped");
     expect((await service.startAgent(agent.id, userA)).status).toBe("ready");
+    const store = (service as unknown as { store: JsonStore }).store;
+    await store.mutate((database) => {
+      database.agentTeamGrants.push({
+        id: "grant-to-delete",
+        agentId: agent.id,
+        teamId: "team-alpha",
+        role: "viewer",
+        allowedActions: ["file.read"],
+        status: "active",
+        approvedBy: "user-a",
+        expiresAt: null,
+        bundleVersion: 1,
+        createdAt: agent.createdAt,
+        updatedAt: agent.updatedAt,
+        revokedAt: null,
+      });
+    });
     await service.deleteAgent(agent.id, userA);
     expect(service.listAgents(userA)).toHaveLength(0);
+    expect(store.snapshot().agentTeamGrants).toEqual([
+      expect.objectContaining({ id: "grant-to-delete", status: "revoked" }),
+    ]);
   });
 
   it("persists a playground conversation", async () => {

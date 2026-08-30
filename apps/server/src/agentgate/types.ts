@@ -10,9 +10,28 @@ export interface TeamMembership {
   role: TeamRole;
 }
 
+export type AgentTeamGrantStatus = "active" | "revoked";
+
+// A persistent enrollment is deliberately narrower than a human membership.
+// Phase 10 registers only the protected file.read action.
+export interface AgentTeamGrant {
+  id: string;
+  agentId: string;
+  teamId: TeamId;
+  role: TeamRole;
+  allowedActions: AgentGateAction[];
+  status: AgentTeamGrantStatus;
+  approvedBy: HumanId;
+  expiresAt: string | null;
+  bundleVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+}
+
 // Keep the policy contract visible in every meaningful decision trail. A
 // version bump is required when the authorization semantics change.
-export const AGENTGATE_POLICY_VERSION = "bouncer-v2";
+export const AGENTGATE_POLICY_VERSION = "bouncer-v3";
 
 export interface HumanPrincipal {
   id: HumanId;
@@ -65,6 +84,7 @@ export interface PolicySubjectAttributes {
   agentId: string;
   runId: string;
   memberships: readonly TeamMembership[];
+  agentGrants: readonly AgentTeamGrant[];
 }
 
 export interface PolicyObjectAttributes {
@@ -96,6 +116,12 @@ export type PolicyDenyReasonCode =
   | "unknown_team"
   | "team_membership_missing"
   | "team_role_insufficient"
+  | "agent_grant_missing"
+  | "agent_grant_revoked"
+  | "agent_grant_expired"
+  | "agent_grant_action_under_scoped"
+  | "agent_grant_role_insufficient"
+  | "runtime_authority_revoked"
   | "action_resource_mismatch";
 
 export type PolicyDecision =
@@ -206,6 +232,10 @@ export interface ApprovalRecord {
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
+  grantId?: string;
+  teamId?: TeamId;
+  bundleVersion?: number;
+  effectiveScope?: string[];
 }
 
 export interface CapabilityLease {
@@ -220,6 +250,10 @@ export interface CapabilityLease {
   issuedAt: string;
   expiresAt: string;
   remainingUses: 1 | 0;
+  grantId?: string;
+  teamId?: TeamId;
+  bundleVersion?: number;
+  effectiveScope?: string[];
 }
 
 export type AuditEventType =
@@ -239,7 +273,9 @@ export type AuditEventType =
   | "capability.issued"
   | "capability.consumed"
   | "protected_action.succeeded"
-  | "protected_action.failed";
+  | "protected_action.failed"
+  | "agent_grant.enrolled"
+  | "agent_grant.revoked";
 
 export type AuditDecision = "allow" | "deny" | "require_approval";
 export type AuditRisk = "low" | "medium" | "high";
@@ -266,6 +302,10 @@ export interface AuditEvent {
   explanation: string | null;
   enforcementPoint: string | null;
   protectedActionExecuted: boolean | null;
+  grantId: string | null;
+  teamId: TeamId | null;
+  bundleVersion: number | null;
+  effectiveScope: string[] | null;
 }
 
 export interface ActionExecutionRecord {

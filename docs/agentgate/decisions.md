@@ -8,9 +8,9 @@ separate middleware products.
 
 ## Registered actions only
 
-The gateway currently protects `resource.read`, `deploy.staging`, and
-`deploy.production`. This keeps the security claim precise: AgentGate is not a
-universal interceptor for Codex's internal shell or file tools.
+The gateway currently protects `resource.read`, `file.read`, `deploy.staging`,
+and `deploy.production`. This keeps the security claim precise: AgentGate is
+not a universal interceptor for Codex's internal shell or file tools.
 
 ## In-memory capability leases with durable approval state
 
@@ -34,3 +34,12 @@ use a separate relationship-and-attribute path so legitimate collaboration does
 not weaken the original User A/User B isolation proof. The first slice is
 read-only and supports fixed demo team roles; file mutation and enterprise
 group lifecycle remain out of scope.
+
+## Persistent Agent grants do not replace Run identity
+
+An Agent may be persistently enrolled in a team by a human who both owns the
+Agent and currently administers that team. The grant carries only registered
+`file.read` scope and a bounded role. Every protected request must still carry
+an active short-lived Run identity and satisfy the current human membership and
+resource threshold. Revocation invalidates active Run authority and is checked
+again at the final enforcement boundary.
