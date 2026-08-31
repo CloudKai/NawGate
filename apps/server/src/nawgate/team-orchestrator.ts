@@ -74,9 +74,10 @@ ${JSON.stringify(agentProfiles, null, 2)}
 
 Rules:
 1. Decompose the request into logical sub-tasks.
-2. If tasks can be done in parallel (independent tasks), set dependsOn to [] or only the common prerequisites.
-3. If a task requires output/contracts from an earlier task, set dependsOn to the required task IDs.
-4. Output MUST be valid JSON only matching:
+2. If the user asks for turn-taking, countdown, or step-by-step collaborative dialogue (e.g. counting down from 10 to 1 alternating between agents), create individual sequential sub-tasks (one per turn/number) alternating between agents, where each step depends on the previous step so that outputs are published turn-by-turn.
+3. If tasks can be done in parallel (independent tasks), set dependsOn to [] or only the common prerequisites.
+4. If a task requires output/contracts from an earlier task, set dependsOn to the required task IDs.
+5. Output MUST be valid JSON only matching:
 {
   "tasks": [
     {

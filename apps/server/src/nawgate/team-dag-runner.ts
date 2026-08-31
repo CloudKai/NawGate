@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { maskSensitiveData } from "./dlp-service.js";
 import type { AppConfig } from "../config.js";
 import type { JsonStore } from "../store.js";
@@ -60,6 +61,11 @@ export class TeamDAGRunner {
       if (run) {
         run.status = "running";
         run.startedAt = now();
+      }
+      const storedRun = database.runs.find((r) => r.id === teamRunId);
+      if (storedRun) {
+        storedRun.status = "running";
+        storedRun.startedAt = now();
       }
     });
 
@@ -287,6 +293,7 @@ export class TeamDAGRunner {
 
       // Parse output for artifacts or contracts
       const extractedArtifacts = this.extractArtifacts(task.id, agent.id, sanitizedOutput);
+      const currentFiles = await this.scanWorkspaceFiles(agent.workspacePath);
 
       // Update blackboard & push chat message
       const completedAt = now();
@@ -303,6 +310,15 @@ export class TeamDAGRunner {
           if (extractedArtifacts.length > 0) {
             run.blackboard.artifacts.push(...extractedArtifacts);
           }
+          const mentionedFiles = this.extractMentionedFiles(agent.name, sanitizedOutput);
+          const allNewFiles = [...currentFiles.map((f) => `${agent.name}: ${f}`), ...mentionedFiles];
+          if (allNewFiles.length > 0) {
+            const existingFiles = new Set(run.blackboard.createdFiles || []);
+            for (const f of allNewFiles) {
+              existingFiles.add(f);
+            }
+            run.blackboard.createdFiles = Array.from(existingFiles);
+          }
         }
 
         // Add message to chat history from this agent
@@ -314,6 +330,7 @@ export class TeamDAGRunner {
           content: sanitizedOutput,
           createdAt: completedAt,
           authorName: agent.name,
+          teamId: teamId ?? null,
         });
 
         // Update agent thread
@@ -443,26 +460,101 @@ export class TeamDAGRunner {
   private extractArtifacts(taskId: string, agentId: string, output: string): TeamArtifact[] {
     const artifacts: TeamArtifact[] = [];
 
-    // Extract code blocks with API contracts or schemas
-    const codeBlockRegex = /```(?:json|typescript|ts|openapi)?\s*([\s\S]*?)```/g;
+    // 1. Extract fenced code blocks
+    const codeBlockRegex = /```([a-zA-Z0-9_-]*)\s*([\s\S]*?)```/g;
     let match: RegExpExecArray | null;
     let index = 1;
 
     while ((match = codeBlockRegex.exec(output)) !== null) {
-      const snippet = (match[1] ?? "").trim();
-      if (snippet && (snippet.includes("/api/") || snippet.includes("endpoint") || snippet.includes("interface") || snippet.includes("{"))) {
+      const lang = (match[1] ?? "").trim();
+      const snippet = (match[2] ?? "").trim();
+      if (snippet) {
+        const isContract =
+          snippet.includes("/api/") ||
+          snippet.includes("endpoint") ||
+          snippet.includes("interface") ||
+          snippet.includes("POST") ||
+          snippet.includes("GET") ||
+          lang === "json" ||
+          lang === "openapi";
+
+        artifacts.push({
+          id: randomUUID(),
+          agentId,
+          taskId,
+          type: isContract ? "contract" : "schema",
+          name: isContract ? `API-Contract-${index++}` : `Artifact-${index++}`,
+          content: snippet.slice(0, 1500),
+          createdAt: now(),
+        });
+      }
+    }
+
+    // 2. If no fenced blocks, check for structured file specifications or endpoint declarations
+    if (
+      artifacts.length === 0 &&
+      (output.includes(".html") ||
+        output.includes(".js") ||
+        output.includes("/login") ||
+        output.includes("/api/"))
+    ) {
+      const bulletLines = output
+        .split("\n")
+        .filter((line) => line.trim().startsWith("-") || line.trim().startsWith("*"))
+        .map((l) => l.trim().replace(/^[-*]\s*/, ""))
+        .filter((l) => l.length > 5);
+
+      if (bulletLines.length > 0) {
         artifacts.push({
           id: randomUUID(),
           agentId,
           taskId,
           type: "contract",
-          name: `Contract-${taskId}-${index++}`,
-          content: snippet.slice(0, 1000),
+          name: `Feature-Specs-${index++}`,
+          content: bulletLines.join("\n"),
           createdAt: now(),
         });
       }
     }
 
     return artifacts;
+  }
+
+  private extractMentionedFiles(agentName: string, output: string): string[] {
+    const files: string[] = [];
+    const fileRegex = /`?([a-zA-Z0-9_\-./]+\.(?:html|js|jsx|ts|tsx|css|json|py|sh|sql))`?(?::\d+)?/gi;
+    let match: RegExpExecArray | null;
+    while ((match = fileRegex.exec(output)) !== null) {
+      const filename = match[1];
+      if (
+        filename &&
+        !filename.includes("README.md") &&
+        !filename.includes("AGENTS.md") &&
+        !filename.startsWith(".")
+      ) {
+        files.push(`${agentName}: ${filename}`);
+      }
+    }
+    return Array.from(new Set(files));
+  }
+
+  private async scanWorkspaceFiles(workspacePath: string): Promise<string[]> {
+    try {
+      const entries = await readdir(workspacePath, { recursive: true });
+      return entries
+        .filter(
+          (entry) =>
+            typeof entry === "string" &&
+            !entry.startsWith(".") &&
+            !entry.includes(".git") &&
+            !entry.includes(".codex") &&
+            entry !== "README.md" &&
+            entry !== "AGENTS.md" &&
+            entry !== ".gitignore",
+        )
+        .sort();
+    } catch {
+      return [];
+    }
   }
 }

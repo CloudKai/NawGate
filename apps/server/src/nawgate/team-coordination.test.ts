@@ -288,13 +288,60 @@ describe("AgentService Team Coordination Routing", () => {
     expect(result.teamRun?.teamId).toBe("team-alpha");
     expect(result.teamRun?.graph.tasks.length).toBeGreaterThanOrEqual(2);
 
-    // Await background DAG execution completion to ensure all database mutations settle cleanly
+    // Await background DAG execution and cleanup completion to ensure all database mutations settle cleanly
     await expect
-      .poll(() => service.getLatestTeamRun(mockAgentA.id, { id: "user-a", name: "User A" })?.status)
+      .poll(() => service.getRun(result.run.id, { id: "user-a", name: "User A" }).status)
       .toBe("completed");
+    await expect
+      .poll(() => service.getActiveRun(mockAgentA.id, { id: "user-a", name: "User A" }))
+      .toBeNull();
 
     const latestTeamRun = service.getLatestTeamRun(mockAgentA.id, { id: "user-a", name: "User A" });
     expect(latestTeamRun).not.toBeNull();
     expect(latestTeamRun?.id).toBe(result.teamRun?.id);
+
+    // Both Agent A and Agent B in team-alpha should share the exact same team chat messages
+    const messagesA = service.getMessages(mockAgentA.id, { id: "user-a", name: "User A" });
+    const messagesB = service.getMessages(mockAgentB.id, { id: "user-a", name: "User A" });
+    expect(messagesA.length).toBeGreaterThanOrEqual(3);
+    expect(messagesA).toEqual(messagesB);
+  });
+
+  it("keeps messages isolated for solo agents not enrolled in a team", async () => {
+    const { store, service } = await createTestEnvironment();
+    const soloAgent: Agent = {
+      id: "agent-solo-99",
+      ownerUserId: "user-a",
+      name: "Solo Agent",
+      description: "Solo worker",
+      instructions: "Do solo work",
+      status: "ready",
+      workspacePath: "/tmp/workspaces/agent-solo-99",
+      codexThreadId: null,
+      lastError: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await store.mutate((db) => {
+      db.agents.push(mockAgentA, mockAgentB, soloAgent);
+      db.agentTeamGrants.push(mockGrantA, mockGrantB); // Solo agent is not in team
+    });
+
+    const soloResult = await service.sendMessage(soloAgent.id, "Hello solo agent", {
+      id: "user-a",
+      name: "User A",
+    });
+
+    await expect
+      .poll(() => service.getRun(soloResult.run.id, { id: "user-a", name: "User A" }).status)
+      .toBe("completed");
+
+    const soloMessages = service.getMessages(soloAgent.id, { id: "user-a", name: "User A" });
+    const teamMessages = service.getMessages(mockAgentA.id, { id: "user-a", name: "User A" });
+
+    expect(soloMessages.length).toBe(2);
+    expect(soloMessages.every((m) => m.agentId === soloAgent.id)).toBe(true);
+    expect(teamMessages.length).toBe(0);
   });
 });

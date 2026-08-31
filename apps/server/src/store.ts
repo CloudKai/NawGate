@@ -1178,11 +1178,20 @@ export class JsonStore {
   }
 
   private async persist(data: Database = this.data): Promise<void> {
+    const content = JSON.stringify(data, null, 2) + "\n";
     const temporaryPath = this.filePath + ".tmp";
-    await writeFile(temporaryPath, JSON.stringify(data, null, 2) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(temporaryPath, this.filePath);
+    try {
+      await writeFile(temporaryPath, content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(temporaryPath, this.filePath);
+    } catch {
+      // Fallback for container volume mounts or file systems where rename has EACCES/EPERM/EBUSY
+      await writeFile(this.filePath, content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+    }
   }
 }

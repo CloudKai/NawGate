@@ -53,6 +53,7 @@ export interface Message {
   content: string;
   createdAt: string;
   authorName?: string;
+  teamId?: string | null;
 }
 
 export interface RunUsage {

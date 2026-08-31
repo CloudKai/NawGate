@@ -180,9 +180,27 @@ export class AgentService {
 
   getMessages(agentId: string, actor: HumanPrincipal): Message[] {
     this.getAgent(agentId, actor);
-    return this.store
-      .snapshot()
-      .messages.filter((message) => message.agentId === agentId)
+    const db = this.store.snapshot();
+    const activeGrant = db.agentTeamGrants.find(
+      (g) => g.agentId === agentId && g.status === "active",
+    );
+    if (activeGrant) {
+      const teamGrants = db.agentTeamGrants.filter(
+        (g) => g.teamId === activeGrant.teamId && g.status === "active",
+      );
+      if (teamGrants.length > 1) {
+        const teamAgentIds = new Set(teamGrants.map((g) => g.agentId));
+        return db.messages
+          .filter(
+            (message) =>
+              message.teamId === activeGrant.teamId ||
+              teamAgentIds.has(message.agentId),
+          )
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      }
+    }
+    return db.messages
+      .filter((message) => message.agentId === agentId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -385,6 +403,7 @@ export class AgentService {
       role: "user",
       content: sanitizedPrompt,
       createdAt: timestamp,
+      teamId,
     };
 
     await this.store.mutate((database) => {

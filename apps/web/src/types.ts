@@ -29,6 +29,7 @@ export interface Message {
   content: string;
   createdAt: string;
   authorName?: string;
+  teamId?: string | null;
 }
 
 export type TaskNodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
@@ -57,7 +58,7 @@ export interface TeamArtifact {
   id: string;
   agentId: string;
   taskId: string;
-  type: "contract" | "file" | "data";
+  type: "contract" | "file" | "data" | "schema";
   name: string;
   content: string;
   createdAt: string;

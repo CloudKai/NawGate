@@ -60,6 +60,7 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [activeTeamRun, setActiveTeamRun] = useState<TeamRun | null>(null);
+  const [showDAGDrawer, setShowDAGDrawer] = useState(false);
   const [actor, setActor] = useState<HumanPrincipal | null>(null);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
@@ -82,6 +83,23 @@ export default function App() {
     () => agents.find((agent) => agent.id === selectedId) ?? null,
     [agents, selectedId],
   );
+
+  const selectedAgentGrant = useMemo(
+    () => grants.find((g) => g.agentId === selected?.id && g.status === "active") ?? null,
+    [grants, selected],
+  );
+
+  const teamMembers = useMemo(() => {
+    if (!selectedAgentGrant) return [];
+    const teamAgentIds = new Set(
+      grants
+        .filter((g) => g.teamId === selectedAgentGrant.teamId && g.status === "active")
+        .map((g) => g.agentId),
+    );
+    return agents.filter((a) => teamAgentIds.has(a.id));
+  }, [grants, selectedAgentGrant, agents]);
+
+  const isMultiAgentTeam = teamMembers.length > 1;
 
   const refreshAgents = useCallback(async (selectFirst = true) => {
     const { agents: next } = await api.listAgents();
@@ -271,13 +289,14 @@ export default function App() {
     pollingRunIds.current.add(runId);
     try {
       while (mountedRef.current) {
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
         if (!mountedRef.current) return;
         const [result, teamRunResult] = await Promise.all([
           api.run(runId),
           api.latestTeamRun(agentId).catch(() => ({ teamRun: null })),
+          refreshMessages(agentId),
+          refreshGate(agentId),
         ]);
-        await refreshGate(agentId);
         if (selectedIdRef.current === agentId) {
           setActiveRun(result.run);
           if (teamRunResult?.teamRun) {
@@ -285,6 +304,10 @@ export default function App() {
           }
         }
         if (!["queued", "running"].includes(result.run.status)) {
+          const finalTeam = await api.latestTeamRun(agentId).catch(() => ({ teamRun: null }));
+          if (finalTeam?.teamRun && selectedIdRef.current === agentId) {
+            setActiveTeamRun(finalTeam.teamRun);
+          }
           await Promise.all([refreshMessages(agentId), refreshAgents(), refreshGate(agentId)]);
           return;
         }
@@ -385,6 +408,7 @@ export default function App() {
         setActiveRun(result.run);
         if (result.teamRun) {
           setActiveTeamRun(result.teamRun);
+          setShowDAGDrawer(true);
         }
       }
       setAgents((current) =>
@@ -493,20 +517,28 @@ export default function App() {
           <span>{agents.length}</span>
         </div>
         <nav className="agent-list">
-          {agents.map((agent) => (
-            <button
-              className={"agent-card " + (agent.id === selectedId ? "selected" : "")}
-              key={agent.id}
-              onClick={() => setSelectedId(agent.id)}
-            >
-              <div className="agent-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
-              <div className="agent-card-copy">
-                <strong>{agent.name}</strong>
-                <span>{agent.description || "Coding Agent"}</span>
-              </div>
-              <span className={"mini-dot mini-" + agent.status} />
-            </button>
-          ))}
+          {agents.map((agent) => {
+            const agentGrant = grants.find((g) => g.agentId === agent.id && g.status === "active");
+            return (
+              <button
+                className={"agent-card " + (agent.id === selectedId ? "selected" : "")}
+                key={agent.id}
+                onClick={() => setSelectedId(agent.id)}
+              >
+                <div className="agent-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
+                <div className="agent-card-copy">
+                  <div className="agent-card-name-row">
+                    <strong>{agent.name}</strong>
+                    {agentGrant && (
+                      <span className="agent-team-tag">{agentGrant.teamId}</span>
+                    )}
+                  </div>
+                  <span>{agent.description || "Coding Agent"}</span>
+                </div>
+                <span className={"mini-dot mini-" + agent.status} />
+              </button>
+            );
+          })}
           {agents.length === 0 && (
             <div className="empty-sidebar">
               <span>◇</span>
@@ -637,22 +669,76 @@ export default function App() {
             <section className="playground">
               <div className="playground-topbar">
                 <div>
-                  <span className="eyebrow">Playground</span>
-                  <h2>Build something with your Agent</h2>
+                  {isMultiAgentTeam ? (
+                    <div className="playground-team-header">
+                      <div className="team-pill-badge">
+                        <span className="team-badge-dot" />
+                        <strong>{selectedAgentGrant?.teamId.toUpperCase()}</strong>
+                        <span>Shared Channel</span>
+                      </div>
+                      <div className="team-member-chips">
+                        {teamMembers.map((member) => (
+                          <span
+                            key={member.id}
+                            className={`team-member-chip ${member.id === selected.id ? "current" : ""}`}
+                            title={`${member.name} (${member.status})`}
+                          >
+                            <span className="team-member-avatar-mini">
+                              {member.name.slice(0, 1).toUpperCase()}
+                            </span>
+                            <span className="team-member-name-mini">{member.name}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="eyebrow">Playground</span>
+                      <h2>Build something with {selected.name}</h2>
+                    </>
+                  )}
                 </div>
-                <div className="session-info">
-                  <span className="pulse" />
-                  {selected.codexThreadId ? "Session connected" : "New session"}
+
+                <div className="playground-topbar-actions">
+                  {activeTeamRun && (
+                    <button
+                      type="button"
+                      className={`button button-dag-toggle ${activeTeamRun.status === "running" ? "is-running" : ""}`}
+                      onClick={() => {
+                        setShowDAGDrawer((prev) => !prev);
+                        if (selected) {
+                          void api.latestTeamRun(selected.id).then((res) => {
+                            if (res.teamRun) setActiveTeamRun(res.teamRun);
+                          });
+                        }
+                      }}
+                      title="Toggle DAG Visualizer & Blackboard"
+                    >
+                      <span>Execution Graph</span>
+                      {activeTeamRun.status === "running" ? (
+                        <span className="dag-pulse-dot-sm" />
+                      ) : (
+                        <span className="dag-count-badge">
+                          {activeTeamRun.graph.tasks.filter((t) => t.status === "completed").length}/
+                          {activeTeamRun.graph.tasks.length}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  <div className="session-info">
+                    <span className="pulse" />
+                    {selected.codexThreadId ? "Session connected" : "New session"}
+                  </div>
                 </div>
               </div>
 
-              {activeTeamRun && (
-                <TeamGraphVisualizer
-                  teamRun={activeTeamRun}
-                  agents={agents}
-                  onClose={() => setActiveTeamRun(null)}
-                />
-              )}
+              <TeamGraphVisualizer
+                isOpen={showDAGDrawer}
+                teamRun={activeTeamRun}
+                agents={agents}
+                onClose={() => setShowDAGDrawer(false)}
+              />
 
               <div className="messages">
                 {messages.length === 0 && !activeRun ? (

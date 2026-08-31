@@ -6,31 +6,30 @@ NawGate provides a built-in **Multi-Agent Coordination Middleware** that automat
 
 ## 🌟 Key Features
 
-1. **Zero-Configuration System Orchestrator**
-   - When agents are enrolled in a team (via `AgentTeamGrant`), incoming prompts sent to any team member automatically trigger the built-in **Team Orchestrator**.
-   - The Orchestrator analyzes the goals, team member instructions, and scopes to produce a structured Task DAG.
-   - Users do not need to manually configure a "Manager Agent" or author complex coordination prompts.
+1. **Unified Shared Team Conversation Channel**
+   - When 2 or more agents are enrolled in a team (e.g. `team-alpha`), selecting any member opens the **Shared Team Channel**.
+   - All collaborating agents and human messages stream into the same shared conversation timeline.
+   - Solo agents or unassigned agents maintain their own private single-agent chat feeds until they join a team.
 
-2. **Dependency-Aware Parallel Execution (DAG)**
-   - Tasks with no dependencies execute concurrently in parallel (`Promise.all`), cutting execution time dramatically.
-   - Tasks requiring prerequisites (e.g. Frontend consuming a Backend API contract) wait at synchronization checkpoints until upstream tasks finish.
+2. **Zero-Configuration System Orchestrator**
+   - When messages are sent in a team channel, the built-in **Team Orchestrator** decomposes goals into a Directed Acyclic Graph (`TaskGraph`) based on member specializations.
 
-3. **Shared Team Blackboard**
+3. **Dependency-Aware Parallel Execution (DAG)**
+   - Tasks with no dependencies execute concurrently in parallel (`Promise.all`), cutting turnaround time.
+   - Tasks requiring upstream outputs wait at synchronization checkpoints.
+
+4. **Shared Team Blackboard**
    - A durable team memory ledger where collaborating agents publish schemas, API contracts, and created file references.
    - Downstream agents automatically receive the latest blackboard artifacts in their context.
 
-4. **Real-Time Interactive DAG Visualizer & Inspector**
-   - Embedded directly in the Web UI above the Playground.
-   - Renders live task nodes with real-time status pulses:
-     - ⚪ **Pending** (Waiting on prerequisites)
-     - 🔵 **Running** (Active concurrent agent execution)
-     - 🟢 **Completed** (With execution duration in ms)
-     - 🔴 **Failed** (With error detail)
-   - Includes a slide-out **Live Blackboard Drawer** displaying shared contracts and created files.
+5. **Slide-Over Interactive DAG Visualizer & Inspector**
+   - Renders as a sleek, non-intrusive **Slide-Over Side Drawer / HUD** that can be toggled on/off via the Playground topbar button (`📊 Execution Graph`) or `Esc` key.
+   - Built with a futuristic glassmorphic cyber-minimal theme, glowing neon status indicators (`pending`, `running`, `completed`, `failed`), and task inspection tabs.
+   - Includes a **Live Blackboard Inspector** with syntax code blocks and copy-to-clipboard functionality.
 
-5. **Integrated Chat & Audit Trail**
-   - Each collaborating agent outputs its turn responses and dialogue directly into the main Chat Timeline with its distinct avatar and name.
-   - Every stage of coordination emits fine-grained audit events (`team_run.started`, `dag_node.started`, `dag_node.completed`, `blackboard.updated`, `team_run.completed`) into NawGate's central `AuditService` and is viewable in the Audit Timeline.
+6. **Integrated Chat & Audit Trail**
+   - Each collaborating agent outputs turn responses directly into the shared channel with its distinct name and avatar.
+   - Emits fine-grained audit events (`team_run.started`, `dag_node.started`, `dag_node.completed`, `blackboard.updated`, `team_run.completed`) into NawGate's central `AuditService`.
 
 ---
 

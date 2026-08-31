@@ -500,7 +500,7 @@ export interface TeamArtifact {
   id: string;
   agentId: string;
   taskId: string;
-  type: "contract" | "file" | "data";
+  type: "contract" | "file" | "data" | "schema";
   name: string;
   content: string;
   createdAt: string;

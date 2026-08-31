@@ -19,14 +19,17 @@ Use these scenarios to test, verify, and demonstrate the **Team DAG Orchestratio
 ## 🚀 Demo Scenario 1: Turn-by-Turn Sequential Collaboration (Countdown)
 
 ### Goal
+
 Demonstrate how 2 leaderless agents alternate turns dynamically with sequential DAG dependencies.
 
 ### Prompt to Send
+
 ```text
 Count down from 10 to 1, alternating turns between both agents in the team.
 ```
 
 ### What to Observe:
+
 1. **DAG Visualizer**:
    - The Orchestrator creates a 10-node sequential chain (`Phase 1` to `Phase 10`).
    - Node 1 (`Count 10`) runs first while subsequent nodes stay in `Pending` state.
@@ -41,14 +44,17 @@ Count down from 10 to 1, alternating turns between both agents in the team.
 ## 🚀 Demo Scenario 2: Parallel Full-Stack Feature (Landing Page + Auth API)
 
 ### Goal
+
 Demonstrate parallel concurrent execution (Backend API + Frontend Scaffolding executing at the same time), followed by a contract handoff and barrier integration.
 
 ### Prompt to Send
+
 ```text
 Build a landing page with a login feature which after a successful login redirects the user to a hello page.
 ```
 
 ### What to Observe:
+
 1. **DAG Visualizer**:
    - **Phase 1 (Parallel Execution)**:
      - `Backend Engineer` executes `Implement Backend API & Schema`.
@@ -67,14 +73,17 @@ Build a landing page with a login feature which after a successful login redirec
 ## 🚀 Demo Scenario 3: Collaborative Code Review & Security Audit
 
 ### Goal
+
 Demonstrate multi-agent parallel analysis followed by synthesis and NawGate policy verification.
 
 ### Prompt to Send
+
 ```text
 Analyze the current repository architecture, identify any security or performance bottlenecks, and generate an improvement proposal.
 ```
 
 ### What to Observe:
+
 1. **DAG Visualizer**:
    - Tasks are scattered in parallel across all team agents to analyze different aspects of the codebase.
    - A final `Verification & Synthesis` task aggregates the findings into a unified report.
