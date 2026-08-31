@@ -152,7 +152,7 @@ script automatically selects Docker, Colima, or Podman.
 
 ### 4. Open the browser
 
-Visit <http://localhost:3000>, or open it from the terminal:
+Visit [http://localhost:3000](http://localhost:3000), or open it from the terminal:
 
 ```bash
 open http://localhost:3000       # macOS
@@ -246,7 +246,7 @@ Start the application:
 docker compose up --build
 ```
 
-Open <http://localhost:3000>. Stop it without deleting Agent data:
+Open [http://localhost:3000](http://localhost:3000). Stop it without deleting Agent data:
 
 ```bash
 docker compose down
@@ -261,8 +261,8 @@ npm install --global @openai/codex@0.111.0
 npm run dev
 ```
 
-- Web UI: <http://localhost:5173>
-- API: <http://localhost:3000>
+- Web UI: [http://localhost:5173](http://localhost:5173)
+- API: [http://localhost:3000](http://localhost:3000)
 
 Use local paths in `.env` when running outside Docker:
 
@@ -295,23 +295,23 @@ cp deploy/volcengine/terraform.tfvars.example \
 
 ## Configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MODEL_PROVIDER` | `ark` | `ark` or `openai-compatible`. |
-| `ARK_API_KEY` | Required for Ark | Ark model API key. |
-| `ARK_MODEL` | Required for Ark | Responses-capable endpoint or model ID. |
-| `ARK_BASE_URL` | Beijing v3 endpoint | Ark OpenAI-compatible API URL. |
-| `OPENAI_API_KEY` | Required for OpenAI-compatible | OpenAI or compatible provider API key. |
-| `OPENAI_MODEL` | Required for OpenAI-compatible | Responses-capable model ID. |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible Responses API URL. |
-| `APP_AUTH_TOKEN` | Empty on loopback | Shared demo token; use 24+ random characters remotely. |
-| `RUNTIME_PROVIDER` | `local-process` | `container` for disposable local Runtime containers. |
-| `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |
-| `CODEX_TIMEOUT_MS` | `600000` | Maximum duration of one turn. |
-| `NAWGATE_GATEWAY_URL` | `http://127.0.0.1:<PORT>` | Runtime gateway URL injected into each Run. |
-| `NAWGATE_APPROVAL_WAIT_MS` | `90000` | Maximum time `agentctl` waits for owner approval. |
-| `NAWGATE_SECURITY_LAB_ENABLED` | `false` | Enables the redacted local/demo Security Lab. |
-| `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
+| Variable                         | Default                        | Purpose                                                |
+| -------------------------------- | ------------------------------ | ------------------------------------------------------ |
+| `MODEL_PROVIDER`               | `ark`                        | `ark` or `openai-compatible`.                      |
+| `ARK_API_KEY`                  | Required for Ark               | Ark model API key.                                     |
+| `ARK_MODEL`                    | Required for Ark               | Responses-capable endpoint or model ID.                |
+| `ARK_BASE_URL`                 | Beijing v3 endpoint            | Ark OpenAI-compatible API URL.                         |
+| `OPENAI_API_KEY`               | Required for OpenAI-compatible | OpenAI or compatible provider API key.                 |
+| `OPENAI_MODEL`                 | Required for OpenAI-compatible | Responses-capable model ID.                            |
+| `OPENAI_BASE_URL`              | `https://api.openai.com/v1`  | OpenAI-compatible Responses API URL.                   |
+| `APP_AUTH_TOKEN`               | Empty on loopback              | Shared demo token; use 24+ random characters remotely. |
+| `RUNTIME_PROVIDER`             | `local-process`              | `container` for disposable local Runtime containers. |
+| `CODEX_SANDBOX_MODE`           | `workspace-write`            | Codex inner sandbox mode.                              |
+| `CODEX_TIMEOUT_MS`             | `600000`                     | Maximum duration of one turn.                          |
+| `NAWGATE_GATEWAY_URL`          | `http://127.0.0.1:<PORT>`    | Runtime gateway URL injected into each Run.            |
+| `NAWGATE_APPROVAL_WAIT_MS`     | `90000`                      | Maximum time`agentctl` waits for owner approval.     |
+| `NAWGATE_SECURITY_LAB_ENABLED` | `false`                      | Enables the redacted local/demo Security Lab.          |
+| `LOCAL_POC_DATA_ROOT`          | Platform-specific              | Local metadata, workspace, and session directory.      |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.
 

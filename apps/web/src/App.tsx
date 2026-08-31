@@ -180,7 +180,7 @@ export default function App() {
 
   useEffect(() => {
     messageEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeRun]);
+  }, [messages.length]);
 
   const createAgent = async (event: React.FormEvent) => {
     event.preventDefault();
