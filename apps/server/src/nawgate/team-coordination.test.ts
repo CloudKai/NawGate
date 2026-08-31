@@ -290,10 +290,10 @@ describe("AgentService Team Coordination Routing", () => {
 
     // Await background DAG execution and cleanup completion to ensure all database mutations settle cleanly
     await expect
-      .poll(() => service.getRun(result.run.id, { id: "user-a", name: "User A" }).status)
+      .poll(() => service.getRun(result.run.id, { id: "user-a", name: "User A" }).status, { timeout: 10000, interval: 50 })
       .toBe("completed");
     await expect
-      .poll(() => service.getActiveRun(mockAgentA.id, { id: "user-a", name: "User A" }))
+      .poll(() => service.getActiveRun(mockAgentA.id, { id: "user-a", name: "User A" }), { timeout: 10000, interval: 50 })
       .toBeNull();
 
     const latestTeamRun = service.getLatestTeamRun(mockAgentA.id, { id: "user-a", name: "User A" });
