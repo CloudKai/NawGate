@@ -32,6 +32,9 @@ credentials, personal data, or exploit details in an issue.
 - The Security Lab is an explicitly enabled local/demo helper that invokes the
   same RuntimeGateway and returns redacted evidence. It is not enabled by
   default and is not a substitute for production test tooling.
+- TikTok-oriented content actions are deterministic synthetic adapters only;
+  they make no external TikTok calls, accept no arbitrary URLs, and should not
+  be treated as a production content platform integration.
 - No CSRF protection
 - No per-Agent container boundary in ECS mode
 - Ordinary local containers, not hardened multi-tenant sandboxes

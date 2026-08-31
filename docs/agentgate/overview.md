@@ -15,7 +15,13 @@ that can execute a protected side effect.
 - User A's Agent cannot read `project-b`, even if an approval identifier is
   supplied.
 - Production deploy is high risk and pauses for owner approval.
-- Approval mints an exact, one-use, short-lived capability.
+- Approval mints an exact, one-use, short-lived capability claim. The claim is
+  durably stored without a bearer secret, so a service restart reconstructs
+  its safe state and concurrent consumers still get one atomic use.
+- Approval and idempotency bindings include the trusted human, Agent, Run,
+  request, action, resource, canonical payload digest, optional destination,
+  grant bundle, policy revision, and protected-resource revision. A payload,
+  destination, grant, policy, or resource revision substitution fails closed.
 - Replays with a new request ID, expired approvals, invalid capabilities, and
   revoked Run authority fail closed without executing the protected action.
 - Every decision is redacted audit evidence. Policy decisions carry the
@@ -30,6 +36,19 @@ that can execute a protected side effect.
 - Team-grant revocation invalidates active Run authority and pending or
   approved capabilities. The gateway re-resolves mutable authority immediately
   before a protected side effect, so a queued stale allow cannot execute.
+- Synthetic TikTok-oriented content actions use a registered organisation →
+  business centre → account → asset hierarchy. `content.moderate` is a
+  processing-only action that returns an aggregate result without raw content;
+  `content.disclose` requires an exact backend-approved account/asset scope.
+  `content.publish` and `content.export` require owner approval and preserve
+  exact asset, destination, purpose, content-version, payload, and one-use
+  capability bindings.
+- Content purposes are a closed set: `safety_moderation`,
+  `creator_requested_publish`, `approved_analytics`, and
+  `compliance_archive`. Missing, unknown, mismatched, cross-business,
+  cross-asset, cross-user, and unregistered-destination inputs fail closed.
+- Legacy approval/action records without the new exact binding are migrated to
+  safe terminal/non-replayable state; unbound claims are not restored.
 
 The Delegation Receipt in the Web UI is a safe summary of the human, Agent,
 team membership role, persistent grant role/bundle, Run, temporary JIT scope,

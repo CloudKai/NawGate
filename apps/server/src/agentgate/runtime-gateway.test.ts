@@ -11,9 +11,41 @@ import { JsonStore } from "../store.js";
 import { AGENTGATE_POLICY_VERSION } from "./types.js";
 import type { AgentTeamGrant } from "./types.js";
 import { RuntimeCredentialService } from "./runtime-credential-service.js";
+import type { Database } from "../types.js";
+
+class InterleavingJsonStore extends JsonStore {
+  interleaveNextMutation = false;
+  interleaveResourceId = "production";
+
+  override async mutate<T>(mutation: (database: Database) => T | Promise<T>): Promise<T> {
+    if (this.interleaveNextMutation) {
+      this.interleaveNextMutation = false;
+      await super.mutate((database) => {
+        const resource = database.protectedResources.find(
+          (candidate) => candidate.id === this.interleaveResourceId,
+        );
+        if (!resource) throw new Error("Expected production resource");
+        resource.revision += 1;
+      });
+    }
+    return super.mutate(mutation);
+  }
+}
 
 const temporaryDirectories: string[] = [];
 const context = { humanId: "user-a" as const, agentId: "agent-a", runId: "run-a" };
+
+function contentPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    purpose: "safety_moderation",
+    organizationId: "org-user-a",
+    businessCenterId: "business-center-user-a",
+    accountId: "account-user-a",
+    assetId: "asset-user-a-video-1",
+    contentVersion: "v1",
+    ...overrides,
+  };
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -23,7 +55,9 @@ afterEach(async () => {
   );
 });
 
-async function makeGateway(): Promise<{
+async function makeGateway(
+  createStore: (filePath: string) => JsonStore = (filePath) => new JsonStore(filePath),
+): Promise<{
   gateway: RuntimeGateway;
   resources: ProtectedResourceService;
   approvals: ApprovalService;
@@ -32,7 +66,7 @@ async function makeGateway(): Promise<{
 }> {
   const root = await mkdtemp(path.join(tmpdir(), "agentgate-gateway-test-"));
   temporaryDirectories.push(root);
-  const store = new JsonStore(path.join(root, "db.json"));
+  const store = createStore(path.join(root, "db.json"));
   await store.initialize();
   const createdAt = "2026-08-30T00:00:00.000Z";
   await store.mutate((database) => {
@@ -162,6 +196,205 @@ describe("RuntimeGateway", () => {
       resourceId: "not-registered",
     });
     expect(unknown).toMatchObject({ status: "denied", reasonCode: "unknown_resource" });
+  });
+
+  it("separates aggregate moderation from explicitly scoped disclosure", async () => {
+    const { gateway, resources, audit } = await makeGateway();
+    const moderation = await gateway.execute(context, {
+      requestId: "request-content-moderate",
+      action: "content.moderate",
+      resourceId: "asset-user-a-video-1",
+      payload: contentPayload(),
+    });
+    expect(moderation).toMatchObject({ status: "success", action: "content.moderate" });
+    if (moderation.status !== "success") throw new Error("Expected moderation success");
+    expect(moderation.result.content).toBeUndefined();
+    expect(moderation.result.summary).toContain("aggregate-only");
+
+    const disclosure = await gateway.execute(context, {
+      requestId: "request-content-disclose",
+      action: "content.disclose",
+      resourceId: "asset-user-a-video-1",
+      destination: "analytics:account-user-a",
+      payload: contentPayload({ purpose: "approved_analytics" }),
+    });
+    expect(disclosure).toMatchObject({ status: "success", action: "content.disclose" });
+    if (disclosure.status !== "success") throw new Error("Expected disclosure success");
+    expect(disclosure.result.content).toContain("Synthetic User A");
+    expect(resources.getExecutionCount("content.moderate", "asset-user-a-video-1")).toBe(1);
+    expect(resources.getExecutionCount("content.disclose", "asset-user-a-video-1")).toBe(1);
+    expect(JSON.stringify(audit.list("agent-a"))).not.toContain("Synthetic User A short-form video payload");
+  });
+
+  it("strictly rejects missing or mismatched content purpose, hierarchy, scope, and destination", async () => {
+    const { gateway, resources } = await makeGateway();
+    const cases: Array<{
+      requestId: string;
+      context?: typeof context;
+      action: "content.moderate" | "content.disclose" | "content.publish";
+      resourceId: string;
+      payload: unknown;
+      destination?: string;
+      reasonCode: string;
+    }> = [
+      {
+        requestId: "request-content-missing-purpose",
+        action: "content.moderate",
+        resourceId: "asset-user-a-video-1",
+        payload: {
+          organizationId: "org-user-a",
+          businessCenterId: "business-center-user-a",
+          accountId: "account-user-a",
+          assetId: "asset-user-a-video-1",
+          contentVersion: "v1",
+        },
+        reasonCode: "malformed_attributes",
+      },
+      {
+        requestId: "request-content-purpose-mismatch",
+        action: "content.moderate",
+        resourceId: "asset-user-a-video-1",
+        payload: contentPayload({ purpose: "creator_requested_publish" }),
+        reasonCode: "content_purpose_mismatch",
+      },
+      {
+        requestId: "request-content-unknown-purpose",
+        action: "content.moderate",
+        resourceId: "asset-user-a-video-1",
+        payload: contentPayload({ purpose: "unknown_purpose" }),
+        reasonCode: "malformed_attributes",
+      },
+      {
+        requestId: "request-content-business-mismatch",
+        action: "content.moderate",
+        resourceId: "asset-user-a-video-1",
+        payload: contentPayload({ businessCenterId: "business-center-user-b" }),
+        reasonCode: "content_asset_mismatch",
+      },
+      {
+        requestId: "request-content-asset-mismatch",
+        action: "content.moderate",
+        resourceId: "asset-user-a-video-1",
+        payload: contentPayload({ assetId: "asset-user-a-video-2" }),
+        reasonCode: "content_asset_mismatch",
+      },
+      {
+        requestId: "request-content-disclosure-scope-missing",
+        action: "content.disclose",
+        resourceId: "asset-user-a-video-2",
+        payload: contentPayload({
+          purpose: "approved_analytics",
+          assetId: "asset-user-a-video-2",
+        }),
+        destination: "analytics:account-user-a",
+        reasonCode: "content_scope_missing",
+      },
+      {
+        requestId: "request-content-unknown-destination",
+        action: "content.publish",
+        resourceId: "asset-user-a-video-1",
+        payload: contentPayload({ purpose: "creator_requested_publish" }),
+        destination: "https://unregistered.example",
+        reasonCode: "content_destination_unknown",
+      },
+      {
+        requestId: "request-content-cross-user",
+        context: { humanId: "user-a", agentId: "agent-a", runId: "run-content-cross-user" },
+        action: "content.moderate",
+        resourceId: "asset-user-b-video-1",
+        payload: {
+          purpose: "safety_moderation",
+          organizationId: "org-user-b",
+          businessCenterId: "business-center-user-b",
+          accountId: "account-user-b",
+          assetId: "asset-user-b-video-1",
+          contentVersion: "v1",
+        },
+        reasonCode: "resource_owner_mismatch",
+      },
+    ];
+    for (const testCase of cases) {
+      await expect(gateway.execute(testCase.context ?? context, {
+        requestId: testCase.requestId,
+        action: testCase.action,
+        resourceId: testCase.resourceId,
+        payload: testCase.payload,
+        ...(testCase.destination ? { destination: testCase.destination } : {}),
+      })).resolves.toMatchObject({ status: "denied", reasonCode: testCase.reasonCode });
+    }
+    expect(resources.getExecutionCount("content.moderate", "asset-user-a-video-1")).toBe(0);
+    expect(resources.getExecutionCount("content.disclose", "asset-user-a-video-2")).toBe(0);
+    expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(0);
+  });
+
+  it("rejects changed protected content before creating approval", async () => {
+    const { gateway, store } = await makeGateway();
+    await store.mutate((database) => {
+      const asset = database.protectedResources.find(
+        (resource) => resource.id === "asset-user-a-video-1",
+      );
+      if (!asset || asset.type !== "content_asset") throw new Error("Expected content asset");
+      asset.contentVersion = "v2";
+    });
+    await expect(gateway.execute(context, {
+      requestId: "request-content-changed",
+      action: "content.moderate",
+      resourceId: "asset-user-a-video-1",
+      payload: contentPayload(),
+    })).resolves.toMatchObject({ status: "denied", reasonCode: "content_version_mismatch" });
+  });
+
+  it("preserves exact publish and export binding through owner approval and replay", async () => {
+    const { gateway, approvals, resources } = await makeGateway();
+    const publish = {
+      requestId: "request-content-publish",
+      action: "content.publish" as const,
+      resourceId: "asset-user-a-video-1",
+      destination: "tiktok:publish:account-user-a",
+      payload: contentPayload({ purpose: "creator_requested_publish" }),
+    };
+    const pendingPublish = await gateway.execute(context, publish);
+    expect(pendingPublish).toMatchObject({
+      status: "approval_required",
+      reasonCode: "content_publish_requires_owner_approval",
+    });
+    if (pendingPublish.status !== "approval_required") throw new Error("Expected publish approval");
+    await approvals.approve(pendingPublish.approvalId, "user-a");
+    await expect(gateway.execute(context, {
+      ...publish,
+      payload: contentPayload({ purpose: "creator_requested_publish", contentVersion: "v2" }),
+    })).resolves.toMatchObject({ status: "denied", reasonCode: "content_version_mismatch" });
+    await expect(gateway.execute(context, {
+      ...publish,
+      approvalId: pendingPublish.approvalId,
+    })).resolves.toMatchObject({ status: "success" });
+    await expect(gateway.execute(context, {
+      ...publish,
+      requestId: "request-content-publish-replay",
+      destination: "tiktok:publish:account-user-b",
+      approvalId: pendingPublish.approvalId,
+    })).resolves.toMatchObject({ status: "denied", reasonCode: "content_destination_mismatch" });
+    expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(1);
+
+    const exportRequest = {
+      requestId: "request-content-export",
+      action: "content.export" as const,
+      resourceId: "asset-user-a-video-1",
+      destination: "compliance:archive:org-user-a",
+      payload: contentPayload({ purpose: "compliance_archive" }),
+    };
+    const pendingExport = await gateway.execute(context, exportRequest);
+    expect(pendingExport).toMatchObject({
+      status: "approval_required",
+      reasonCode: "content_export_requires_owner_approval",
+    });
+    if (pendingExport.status !== "approval_required") throw new Error("Expected export approval");
+    await approvals.approve(pendingExport.approvalId, "user-a");
+    await expect(gateway.execute(context, {
+      ...exportRequest,
+      approvalId: pendingExport.approvalId,
+    })).resolves.toMatchObject({ status: "success" });
+    expect(resources.getExecutionCount("content.export", "asset-user-a-video-1")).toBe(1);
   });
 
   it("enforces server-resolved team membership and role at the protected file boundary", async () => {
@@ -524,6 +757,142 @@ describe("RuntimeGateway", () => {
           protectedActionExecuted: false,
           policyVersion: AGENTGATE_POLICY_VERSION,
         }),
+      ]),
+    );
+  });
+
+  it("uses one canonical payload binding for approval and rejects one-character changes", async () => {
+    const { gateway, resources, approvals } = await makeGateway();
+    const original = {
+      requestId: "request-production-payload",
+      action: "deploy.production" as const,
+      resourceId: "production",
+      payload: { version: "release-a" },
+      destination: "production-primary",
+    };
+    const pending = await gateway.execute(context, original);
+    expect(pending).toMatchObject({ status: "approval_required" });
+    if (pending.status !== "approval_required") throw new Error("Expected approval");
+
+    await expect(
+      gateway.execute(context, { ...original, payload: { version: "release-b" } }),
+    ).resolves.toMatchObject({ status: "conflict", reasonCode: "idempotency_mismatch" });
+
+    await approvals.approve(pending.approvalId, "user-a");
+    await expect(
+      gateway.execute(context, { ...original, approvalId: pending.approvalId }),
+    ).resolves.toMatchObject({ status: "success" });
+    await expect(
+      gateway.execute(context, {
+        ...original,
+        requestId: "request-production-payload-mutated",
+        payload: { version: "release-b" },
+        approvalId: pending.approvalId,
+      }),
+    ).resolves.toMatchObject({ status: "denied", reasonCode: "capability_consumed" });
+    expect(resources.getExecutionCount("deploy.production", "production")).toBe(1);
+  });
+
+  it("fails closed when a consumed capability becomes stale before the protected side effect", async () => {
+    const { gateway, resources, approvals } = await makeGateway();
+    const originalConsume = approvals.consumeCapability.bind(approvals);
+    approvals.consumeCapability = async (request) => {
+      const result = await originalConsume(request);
+      if (result.status === "consumed") await resources.bumpRevision("production");
+      return result;
+    };
+    const pending = await gateway.execute(context, {
+      requestId: "request-stale-capability",
+      action: "deploy.production",
+      resourceId: "production",
+    });
+    expect(pending).toMatchObject({ status: "approval_required" });
+    if (pending.status !== "approval_required") throw new Error("Expected approval");
+    await approvals.approve(pending.approvalId, "user-a");
+
+    await expect(
+      gateway.execute(context, {
+        requestId: "request-stale-capability",
+        action: "deploy.production",
+        resourceId: "production",
+        approvalId: pending.approvalId,
+      }),
+    ).resolves.toMatchObject({ status: "denied", reasonCode: "resource_revision_changed" });
+    expect(resources.getExecutionCount("deploy.production", "production")).toBe(0);
+    expect(resources.getDeploymentState("production", "production")?.deploymentCount).toBe(0);
+  });
+
+  it("atomically rejects a revision bump between the protected check and deployment mutation", async () => {
+    let interleavingStore!: InterleavingJsonStore;
+    const { gateway, resources, approvals } = await makeGateway((filePath) => {
+      interleavingStore = new InterleavingJsonStore(filePath);
+      return interleavingStore;
+    });
+    const originalConsume = approvals.consumeCapability.bind(approvals);
+    approvals.consumeCapability = async (request) => {
+      const result = await originalConsume(request);
+      if (result.status === "consumed") interleavingStore.interleaveNextMutation = true;
+      return result;
+    };
+    const pending = await gateway.execute(context, {
+      requestId: "request-atomic-revision",
+      action: "deploy.production",
+      resourceId: "production",
+    });
+    expect(pending).toMatchObject({ status: "approval_required" });
+    if (pending.status !== "approval_required") throw new Error("Expected approval");
+    await approvals.approve(pending.approvalId, "user-a");
+
+    await expect(
+      gateway.execute(context, {
+        requestId: "request-atomic-revision",
+        action: "deploy.production",
+        resourceId: "production",
+        approvalId: pending.approvalId,
+      }),
+    ).resolves.toMatchObject({ status: "failed", reasonCode: "protected_action_failed" });
+    expect(resources.getDeploymentState("production", "production")?.deploymentCount).toBe(0);
+    expect(resources.getExecutionCount("deploy.production", "production")).toBe(0);
+    expect(resources.getMetadata("production")?.revision).toBe(2);
+  });
+
+  it("atomically rejects a content revision bump before recording any content action", async () => {
+    let interleavingStore!: InterleavingJsonStore;
+    const { gateway, resources, approvals, store } = await makeGateway((filePath) => {
+      interleavingStore = new InterleavingJsonStore(filePath);
+      interleavingStore.interleaveResourceId = "asset-user-a-video-1";
+      return interleavingStore;
+    });
+    const originalConsume = approvals.consumeCapability.bind(approvals);
+    approvals.consumeCapability = async (request) => {
+      const result = await originalConsume(request);
+      if (result.status === "consumed") interleavingStore.interleaveNextMutation = true;
+      return result;
+    };
+    const publish = {
+      requestId: "request-content-atomic-revision",
+      action: "content.publish" as const,
+      resourceId: "asset-user-a-video-1",
+      destination: "tiktok:publish:account-user-a",
+      payload: contentPayload({ purpose: "creator_requested_publish" }),
+    };
+    const pending = await gateway.execute(context, publish);
+    expect(pending).toMatchObject({ status: "approval_required" });
+    if (pending.status !== "approval_required") throw new Error("Expected publish approval");
+    await approvals.approve(pending.approvalId, "user-a");
+
+    await expect(gateway.execute(context, {
+      ...publish,
+      approvalId: pending.approvalId,
+    })).resolves.toMatchObject({
+      status: "failed",
+      reasonCode: "protected_action_failed",
+    });
+    expect(resources.getMetadata("asset-user-a-video-1")?.revision).toBe(2);
+    expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(0);
+    expect(store.snapshot().actionExecutions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "content.publish", status: "succeeded" }),
       ]),
     );
   });

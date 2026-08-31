@@ -105,7 +105,29 @@ describe("agentctl", () => {
     });
   });
 
-  it("does not expose a file write/delete/share/export command", async () => {
+  it("sends structured synthetic content actions with no arbitrary destination", async () => {
+    const result = await runCli(["content", "moderate", "asset-user-a-video-1"], "success");
+    expect(result.code).toBe(0);
+    expect(result.received).toHaveLength(1);
+    expect(result.received[0]).toMatchObject({
+      pathname: "/api/runtime/actions",
+      body: {
+        action: "content.moderate",
+        resourceId: "asset-user-a-video-1",
+        payload: {
+          purpose: "safety_moderation",
+          organizationId: "org-user-a",
+          businessCenterId: "business-center-user-a",
+          accountId: "account-user-a",
+          assetId: "asset-user-a-video-1",
+          contentVersion: "v1",
+        },
+      },
+    });
+    expect(result.received[0].body).not.toHaveProperty("destination");
+  });
+
+  it("does not expose a file write/delete/share command", async () => {
     const result = await runCli(["file", "write", "team-alpha-internal"], "success");
     expect(result.code).toBe(1);
     expect(result.received).toHaveLength(0);

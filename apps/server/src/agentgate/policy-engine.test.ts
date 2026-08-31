@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DeterministicPolicyEngine } from "./policy-engine.js";
+import { demoContentScopes } from "./content-model.js";
 import type {
   AgentTeamGrant,
   PolicyInput,
@@ -27,6 +28,7 @@ const projectA: ProtectedResource = {
   type: "project_profile",
   ownerUserId: "user-a",
   classification: "sensitive",
+  revision: 1,
 };
 const alphaInternal: ProtectedResource = {
   id: "team-alpha-internal",
@@ -35,6 +37,7 @@ const alphaInternal: ProtectedResource = {
   teamId: "team-alpha",
   classification: "internal",
   minimumRole: "viewer",
+  revision: 1,
 };
 const alphaRestricted: ProtectedResource = {
   id: "team-alpha-restricted",
@@ -43,6 +46,19 @@ const alphaRestricted: ProtectedResource = {
   teamId: "team-alpha",
   classification: "restricted",
   minimumRole: "editor",
+  revision: 1,
+};
+const contentAssetA: ProtectedResource = {
+  id: "asset-user-a-video-1",
+  type: "content_asset",
+  ownerUserId: "user-a",
+  classification: "restricted",
+  revision: 1,
+  organizationId: "org-user-a",
+  businessCenterId: "business-center-user-a",
+  accountId: "account-user-a",
+  assetId: "asset-user-a-video-1",
+  contentVersion: "v1",
 };
 
 function input(
@@ -55,7 +71,14 @@ function input(
 ): PolicyInput {
   return {
     requestId: "request-a",
-    subject: { humanId, agentId: "agent-a", runId: "run-a", memberships, agentGrants },
+    subject: {
+      humanId,
+      agentId: "agent-a",
+      runId: "run-a",
+      memberships,
+      agentGrants,
+      contentScopes: [],
+    },
     object: { resource },
     action: { name: action },
     environment: { name: environment },
@@ -89,6 +112,7 @@ describe("DeterministicPolicyEngine", () => {
         type: "deployment_target",
         ownerUserId: "user-a",
         classification: "internal",
+        revision: 1,
     }, "deploy.staging", [], "staging")),
     ).resolves.toEqual({
       outcome: "allow",
@@ -101,6 +125,7 @@ describe("DeterministicPolicyEngine", () => {
         type: "deployment_target",
         ownerUserId: "user-a",
         classification: "sensitive",
+        revision: 1,
       }, "deploy.production", [], "production")),
     ).resolves.toEqual({
       outcome: "require_approval",
@@ -135,6 +160,7 @@ describe("DeterministicPolicyEngine", () => {
       teamId: "team-beta",
       classification: "internal",
       minimumRole: "viewer",
+      revision: 1,
     }, "file.read"))).resolves.toMatchObject({
       outcome: "deny",
       reasonCode: "team_membership_missing",
@@ -197,6 +223,74 @@ describe("DeterministicPolicyEngine", () => {
       outcome: "require_approval",
       reasonCode: "restricted_file_requires_temporary_elevation",
     });
+  });
+
+  it("enforces typed content purpose, hierarchy, and explicit disclosure scope", async () => {
+    const contentInput = (
+      action: "content.moderate" | "content.disclose" | "content.publish",
+      purpose: "safety_moderation" | "approved_analytics" | "creator_requested_publish",
+      destination: string | null = null,
+      bindingOverrides: Record<string, unknown> = {},
+    ): PolicyInput => ({
+      requestId: "content-request",
+      subject: {
+        humanId: "user-a",
+        agentId: "agent-a",
+        runId: "run-a",
+        memberships: [],
+        agentGrants: [],
+        contentScopes: demoContentScopes("user-a"),
+      },
+      object: { resource: contentAssetA },
+      action: {
+        name: action,
+        destination,
+        contentBinding: {
+          purpose,
+          organizationId: "org-user-a",
+          businessCenterId: "business-center-user-a",
+          accountId: "account-user-a",
+          assetId: "asset-user-a-video-1",
+          contentVersion: "v1",
+          ...bindingOverrides,
+        },
+      },
+      environment: { name: "local" },
+    });
+
+    await expect(policy.evaluate(contentInput("content.moderate", "safety_moderation"))).resolves.toMatchObject({
+      outcome: "allow",
+      reasonCode: "content_moderation_allowed",
+    });
+    await expect(policy.evaluate(contentInput(
+      "content.disclose",
+      "approved_analytics",
+      "analytics:account-user-a",
+    ))).resolves.toMatchObject({ outcome: "allow", reasonCode: "content_disclosure_allowed" });
+    await expect(policy.evaluate(contentInput(
+      "content.publish",
+      "creator_requested_publish",
+      "tiktok:publish:account-user-a",
+    ))).resolves.toMatchObject({
+      outcome: "require_approval",
+      reasonCode: "content_publish_requires_owner_approval",
+    });
+    await expect(policy.evaluate(contentInput(
+      "content.moderate",
+      "approved_analytics",
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_purpose_mismatch" });
+    await expect(policy.evaluate(contentInput(
+      "content.disclose",
+      "approved_analytics",
+      "analytics:account-user-a",
+      { assetId: "asset-user-a-video-2" },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_asset_mismatch" });
+    await expect(policy.evaluate(contentInput(
+      "content.disclose",
+      "approved_analytics",
+      "analytics:account-user-a",
+      { contentVersion: "v2" },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_version_mismatch" });
   });
 
   it("fails closed on unknown teams, malformed attributes, and action/resource mismatch", async () => {

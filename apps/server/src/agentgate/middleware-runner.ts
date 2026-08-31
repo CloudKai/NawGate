@@ -1,6 +1,7 @@
 import type { AppConfig } from "../config.js";
 import { RunCancelledError } from "../errors.js";
 import { AuditService } from "./audit-service.js";
+import { ApprovalService } from "./approval-service.js";
 import { RuntimeCredentialService } from "./runtime-credential-service.js";
 import type {
   AgentRunner,
@@ -20,6 +21,7 @@ export class MiddlewareRunner implements AgentRunner {
     private readonly credentials: RuntimeCredentialService,
     private readonly audit: AuditService,
     private readonly config: AppConfig,
+    private readonly approvals?: ApprovalService,
   ) {}
 
   async run(request: RunnerRequest): Promise<RunnerResult> {
@@ -128,6 +130,7 @@ export class MiddlewareRunner implements AgentRunner {
       throw error;
     } finally {
       this.credentials.revoke(request.runId);
+      await this.approvals?.revokeForRun(request.runId, "run_finished");
       await this.audit.record({
         eventType: "runtime_identity.revoked",
         humanId: request.ownerUserId,

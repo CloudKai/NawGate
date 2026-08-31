@@ -8,15 +8,36 @@ separate middleware products.
 
 ## Registered actions only
 
-The gateway currently protects `resource.read`, `file.read`, `deploy.staging`,
-and `deploy.production`. This keeps the security claim precise: AgentGate is
-not a universal interceptor for Codex's internal shell or file tools.
+The gateway protects the original project/team/deployment actions plus the
+registered synthetic content actions `content.moderate`, `content.disclose`,
+`content.publish`, and `content.export`. This keeps the security claim
+precise: AgentGate is not a universal interceptor for Codex's internal shell
+or file tools.
 
-## In-memory capability leases with durable approval state
+## Purpose-bound synthetic content model
 
-Approval records are stored in the existing JSON store. The one-use capability
-is held in memory and is recreated only by a fresh owner approval. A restart
-therefore fails closed for an approved record whose ephemeral lease is gone.
+The TikTok-oriented demo uses a deterministic organisation → business centre →
+account → asset hierarchy in registered protected-resource metadata. Content
+requests must carry one of four closed purposes and the exact hierarchy plus
+content version. Moderation returns aggregate-only evidence and never raw
+content. Disclosure is a separate action requiring an explicit backend-owned
+scope for the exact account and asset. Publish and export use the existing
+owner-approval and durable one-use capability flow, with exact payload and
+destination binding. All destinations and adapters are local synthetic values;
+there are no external TikTok calls or arbitrary URLs.
+
+## Durable payload-bound capability claims
+
+Approval records and non-secret one-use capability claims are stored in the
+existing JSON store. Claims contain only trusted identity/action metadata,
+canonical payload digest, optional destination, grant/policy/resource
+revisions, timestamps, and remaining uses; raw payloads and bearer credentials
+are never persisted. JsonStore serializes the approval-to-claim and
+claim-to-consumed transitions and atomically persists them. A restart can
+reconstruct an approved claim, while concurrent consumers still get one use.
+
+The v4-to-v5 migration terminalizes approval/action records that lack the new
+binding and drops unbound claims, so legacy state cannot regain authority.
 
 ## Provider-neutral model configuration
 

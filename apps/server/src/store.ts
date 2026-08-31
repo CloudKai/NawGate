@@ -9,6 +9,7 @@ import {
 } from "./agentgate/demo-users.js";
 import type {
   AgentTeamGrant,
+  CapabilityClaim,
   DeploymentState,
   TeamMembership,
 } from "./agentgate/types.js";
@@ -32,7 +33,7 @@ const deploymentFixtures: readonly DeploymentState[] = [
 ];
 
 const emptyDatabase = (): Database => seedDatabase({
-  version: 4,
+  version: 5,
   agents: [],
   messages: [],
   runs: [],
@@ -43,6 +44,7 @@ const emptyDatabase = (): Database => seedDatabase({
   actionExecutions: [],
   teamMemberships: [],
   agentTeamGrants: [],
+  capabilityClaims: [],
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +93,10 @@ function isAgentTeamGrant(value: unknown): value is AgentTeamGrant {
     "file.read",
     "deploy.staging",
     "deploy.production",
+    "content.moderate",
+    "content.disclose",
+    "content.publish",
+    "content.export",
   ];
   return (
     isRecord(value) &&
@@ -186,6 +192,130 @@ function migrateAuditEvents(value: unknown[]): Database["auditEvents"] {
   });
 }
 
+function migrateProtectedResources(value: unknown[]): Database["protectedResources"] {
+  return value.map((candidate) => {
+    if (!isRecord(candidate)) return candidate as Database["protectedResources"][number];
+    const revision =
+      typeof candidate.revision === "number" &&
+      Number.isInteger(candidate.revision) &&
+      candidate.revision > 0
+        ? candidate.revision
+        : 1;
+    return { ...candidate, revision } as Database["protectedResources"][number];
+  });
+}
+
+function isPayloadDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function migrateApprovals(value: unknown[]): Database["approvals"] {
+  return value.map((candidate) => {
+    const record = isRecord(candidate) ? candidate : {};
+    const hasBinding =
+      isPayloadDigest(record.payloadDigest) &&
+      (record.destination === null || typeof record.destination === "string") &&
+      typeof record.policyRevision === "string" &&
+      record.policyRevision.length > 0 &&
+      typeof record.resourceRevision === "number" &&
+      Number.isInteger(record.resourceRevision) &&
+      record.resourceRevision > 0;
+    const approval = {
+      ...(candidate as object),
+      payloadDigest: hasBinding ? record.payloadDigest : null,
+      destination:
+        hasBinding && (record.destination === null || typeof record.destination === "string")
+          ? record.destination
+          : null,
+      policyRevision: hasBinding ? record.policyRevision : null,
+      resourceRevision: hasBinding ? record.resourceRevision : null,
+      // Legacy approvals have no proof of the exact operation they authorized.
+      // Preserve them as terminal records so restart cannot make them usable.
+      ...(hasBinding
+        ? {}
+        : {
+            status: "revoked",
+            decidedAt:
+              typeof record.decidedAt === "string"
+                ? record.decidedAt
+                : typeof record.createdAt === "string"
+                  ? record.createdAt
+                  : null,
+            reasonCode: "legacy_unbound_approval",
+          }),
+    } as Database["approvals"][number];
+    return approval;
+  });
+}
+
+function migrateActionExecutions(value: unknown[]): Database["actionExecutions"] {
+  return value.map((candidate) => {
+    const record = isRecord(candidate) ? candidate : {};
+    return {
+      ...(candidate as object),
+      payloadDigest: isPayloadDigest(record.payloadDigest) ? record.payloadDigest : null,
+      destination: typeof record.destination === "string" ? record.destination : null,
+      policyRevision:
+        typeof record.policyRevision === "string" && record.policyRevision.length > 0
+          ? record.policyRevision
+          : null,
+      resourceRevision:
+        typeof record.resourceRevision === "number" &&
+        Number.isInteger(record.resourceRevision) &&
+        record.resourceRevision > 0
+          ? record.resourceRevision
+          : null,
+    } as Database["actionExecutions"][number];
+  });
+}
+
+function isCapabilityClaim(value: unknown): value is CapabilityClaim {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" && value.id.length > 0 &&
+    typeof value.approvalId === "string" && value.approvalId.length > 0 &&
+    typeof value.humanId === "string" && isHumanId(value.humanId) &&
+    typeof value.agentId === "string" && value.agentId.length > 0 &&
+    typeof value.runId === "string" && value.runId.length > 0 &&
+    typeof value.action === "string" &&
+      [
+        "resource.read",
+        "file.read",
+        "deploy.staging",
+        "deploy.production",
+        "content.moderate",
+        "content.disclose",
+        "content.publish",
+        "content.export",
+      ].includes(value.action) &&
+    typeof value.resourceId === "string" && value.resourceId.length > 0 &&
+    typeof value.requestId === "string" && value.requestId.length > 0 &&
+    isPayloadDigest(value.payloadDigest) &&
+    (value.destination === null || typeof value.destination === "string") &&
+    typeof value.policyRevision === "string" && value.policyRevision.length > 0 &&
+    typeof value.resourceRevision === "number" &&
+      Number.isInteger(value.resourceRevision) && value.resourceRevision > 0 &&
+    typeof value.issuedAt === "string" && Number.isFinite(Date.parse(value.issuedAt)) &&
+    typeof value.expiresAt === "string" && Number.isFinite(Date.parse(value.expiresAt)) &&
+    (value.remainingUses === 0 || value.remainingUses === 1) &&
+    (value.grantId === undefined || typeof value.grantId === "string") &&
+    (value.teamId === undefined || (typeof value.teamId === "string" && isTeamId(value.teamId))) &&
+    (value.bundleVersion === undefined || (typeof value.bundleVersion === "number" && Number.isInteger(value.bundleVersion) && value.bundleVersion > 0)) &&
+    (value.effectiveScope === undefined || (Array.isArray(value.effectiveScope) && value.effectiveScope.every((item) => typeof item === "string"))) &&
+    (value.humanRole === undefined || (typeof value.humanRole === "string" && isTeamRole(value.humanRole))) &&
+    (value.agentRole === undefined || (typeof value.agentRole === "string" && isTeamRole(value.agentRole))) &&
+    (value.resourceClassification === undefined || value.resourceClassification === "internal" || value.resourceClassification === "sensitive" || value.resourceClassification === "restricted") &&
+    (value.temporaryScope === undefined || (Array.isArray(value.temporaryScope) && value.temporaryScope.every((item) => typeof item === "string")))
+  );
+}
+
+function migrateCapabilityClaims(value: unknown): Database["capabilityClaims"] {
+  if (!Array.isArray(value)) return [];
+  // A malformed or legacy claim is intentionally discarded. Its associated
+  // approval remains non-usable because consumption requires a valid claim.
+  return value.filter(isCapabilityClaim).map((claim) => structuredClone(claim));
+}
+
 export function migrateDatabase(value: unknown): Database {
   if (!isRecord(value) || !Array.isArray(value.agents) || !Array.isArray(value.messages) || !Array.isArray(value.runs)) {
     throw new Error("Unsupported database format");
@@ -196,7 +326,7 @@ export function migrateDatabase(value: unknown): Database {
       throw new Error("Unsupported database format");
     }
     return seedDatabase({
-      version: 4,
+      version: 5,
       agents: value.agents.map((agent) => ({
         ...(agent as object),
         ownerUserId: "user-a",
@@ -210,6 +340,7 @@ export function migrateDatabase(value: unknown): Database {
       actionExecutions: [],
       teamMemberships: [],
       agentTeamGrants: [],
+      capabilityClaims: [],
     });
   }
 
@@ -230,17 +361,18 @@ export function migrateDatabase(value: unknown): Database {
       throw new Error("Unsupported database format");
     }
     return seedDatabase({
-      version: 4,
+      version: 5,
       agents: value.agents as Database["agents"],
       messages: value.messages as Database["messages"],
       runs: value.runs as Database["runs"],
-      approvals: value.approvals as Database["approvals"],
+      approvals: migrateApprovals(value.approvals),
       auditEvents: migrateAuditEvents(value.auditEvents),
-      protectedResources: value.protectedResources as Database["protectedResources"],
+      protectedResources: migrateProtectedResources(value.protectedResources),
       deploymentStates: value.deploymentStates as Database["deploymentStates"],
-      actionExecutions: value.actionExecutions as Database["actionExecutions"],
+      actionExecutions: migrateActionExecutions(value.actionExecutions),
       teamMemberships: [],
       agentTeamGrants: [],
+      capabilityClaims: [],
     });
   }
 
@@ -263,23 +395,64 @@ export function migrateDatabase(value: unknown): Database {
       throw new Error("Unsupported database format");
     }
     return seedDatabase({
-      version: 4,
+      version: 5,
       agents: value.agents as Database["agents"],
       messages: value.messages as Database["messages"],
       runs: value.runs as Database["runs"],
-      approvals: value.approvals as Database["approvals"],
+      approvals: migrateApprovals(value.approvals),
       auditEvents: migrateAuditEvents(value.auditEvents),
-      protectedResources: value.protectedResources as Database["protectedResources"],
+      protectedResources: migrateProtectedResources(value.protectedResources),
       deploymentStates: value.deploymentStates as Database["deploymentStates"],
-      actionExecutions: value.actionExecutions as Database["actionExecutions"],
+      actionExecutions: migrateActionExecutions(value.actionExecutions),
       teamMemberships: value.teamMemberships as Database["teamMemberships"],
       // Existing agents are never silently enrolled in a team.
       agentTeamGrants: [],
+      capabilityClaims: [],
+    });
+  }
+
+  if (value.version === 4) {
+    if (
+      !value.agents.every(
+        (agent) =>
+          isRecord(agent) &&
+          typeof agent.ownerUserId === "string" &&
+          isHumanId(agent.ownerUserId),
+      ) ||
+      !Array.isArray(value.approvals) ||
+      !Array.isArray(value.auditEvents) ||
+      !Array.isArray(value.protectedResources) ||
+      !Array.isArray(value.deploymentStates) ||
+      !Array.isArray(value.actionExecutions) ||
+      !Array.isArray(value.teamMemberships) ||
+      !value.teamMemberships.every(isTeamMembership) ||
+      !Array.isArray(value.agentTeamGrants) ||
+      !value.agentTeamGrants.every(isAgentTeamGrant) ||
+      !isValidAgentTeamGrantSet(
+        value.agentTeamGrants as AgentTeamGrant[],
+        value.agents as Database["agents"],
+      )
+    ) {
+      throw new Error("Unsupported database format");
+    }
+    return seedDatabase({
+      version: 5,
+      agents: value.agents as Database["agents"],
+      messages: value.messages as Database["messages"],
+      runs: value.runs as Database["runs"],
+      approvals: migrateApprovals(value.approvals),
+      auditEvents: migrateAuditEvents(value.auditEvents),
+      protectedResources: migrateProtectedResources(value.protectedResources),
+      deploymentStates: value.deploymentStates as Database["deploymentStates"],
+      actionExecutions: migrateActionExecutions(value.actionExecutions),
+      teamMemberships: value.teamMemberships as Database["teamMemberships"],
+      agentTeamGrants: value.agentTeamGrants as Database["agentTeamGrants"],
+      capabilityClaims: [],
     });
   }
 
   if (
-    value.version !== 4 ||
+    value.version !== 5 ||
     !value.agents.every(
       (agent) =>
         isRecord(agent) &&
@@ -295,6 +468,7 @@ export function migrateDatabase(value: unknown): Database {
     !value.teamMemberships.every(isTeamMembership) ||
     !Array.isArray(value.agentTeamGrants) ||
     !value.agentTeamGrants.every(isAgentTeamGrant) ||
+    !Array.isArray(value.capabilityClaims) ||
     !isValidAgentTeamGrantSet(
       value.agentTeamGrants as AgentTeamGrant[],
       value.agents as Database["agents"],
@@ -305,7 +479,11 @@ export function migrateDatabase(value: unknown): Database {
 
   return seedDatabase({
     ...(value as unknown as Database),
+    approvals: migrateApprovals(value.approvals),
     auditEvents: migrateAuditEvents(value.auditEvents),
+    protectedResources: migrateProtectedResources(value.protectedResources),
+    actionExecutions: migrateActionExecutions(value.actionExecutions),
+    capabilityClaims: migrateCapabilityClaims(value.capabilityClaims),
   });
 }
 

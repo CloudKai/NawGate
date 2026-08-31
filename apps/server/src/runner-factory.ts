@@ -2,6 +2,7 @@ import type { AppConfig } from "./config.js";
 import { ContainerCodexRunner } from "./container-codex-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { AuditService } from "./agentgate/audit-service.js";
+import { ApprovalService } from "./agentgate/approval-service.js";
 import { MiddlewareRunner } from "./agentgate/middleware-runner.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import type { JsonStore } from "./store.js";
@@ -10,6 +11,7 @@ import type { AgentRunner } from "./types.js";
 export interface RunnerDependencies {
   credentials: RuntimeCredentialService;
   audit: AuditService;
+  approvals?: ApprovalService;
 }
 
 export function createRunner(
@@ -29,5 +31,6 @@ export function createRunner(
     dependencies.credentials,
     dependencies.audit,
     config,
+    dependencies.approvals,
   );
 }

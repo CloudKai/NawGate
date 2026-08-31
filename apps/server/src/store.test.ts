@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates v1 data to v4 and seeds team relationships without grants", async () => {
+  it("migrates v1 data to v5 and seeds team relationships without grants", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -47,7 +47,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(4);
+    expect(database.version).toBe(5);
     expect(database.agentTeamGrants).toEqual([]);
     expect(database.agents[0]?.ownerUserId).toBe("user-a");
     expect(database.protectedResources.map((resource) => resource.id)).toEqual([
@@ -58,6 +58,9 @@ describe("JsonStore", () => {
       "team-alpha-internal",
       "team-alpha-restricted",
       "team-beta-internal",
+      "asset-user-a-video-1",
+      "asset-user-a-video-2",
+      "asset-user-b-video-1",
     ]);
     expect(database.deploymentStates.map((state) => state.resourceId)).toEqual([
       "staging",
@@ -69,7 +72,7 @@ describe("JsonStore", () => {
       { teamId: "team-beta", humanId: "user-b", role: "editor" },
     ]);
     expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
-      version: 4,
+      version: 5,
       agentTeamGrants: [],
     });
   });
@@ -93,7 +96,7 @@ describe("JsonStore", () => {
     const store = new JsonStore(filePath);
     await store.initialize();
 
-    expect(store.snapshot().version).toBe(4);
+    expect(store.snapshot().version).toBe(5);
     expect(store.snapshot().agentTeamGrants).toEqual([]);
     expect(store.snapshot().teamMemberships).toHaveLength(3);
     expect(store.snapshot().protectedResources).toEqual(
@@ -103,7 +106,7 @@ describe("JsonStore", () => {
     );
   });
 
-  it("migrates v3 relationships to v4 without silently enrolling Agents", async () => {
+  it("migrates v3 relationships to v5 without silently enrolling Agents", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v3-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -149,7 +152,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(4);
+    expect(database.version).toBe(5);
     expect(database.agentTeamGrants).toEqual([]);
     expect(database.teamMemberships).toEqual(
       expect.arrayContaining([

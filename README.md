@@ -45,6 +45,9 @@ Volcengine ECS.
 - Owner approval for high-risk production deploys and exact one-use JIT
   elevation for restricted team-file reads; JIT never mutates the Agent's
   persistent viewer grant
+- Purpose-bound synthetic content actions for moderation, scoped disclosure,
+  owner-approved publishing, and owner-approved compliance export across a
+  deterministic organisation/business-centre/account/asset hierarchy
 - Redacted audit timeline and Delegation Receipt with policy version, reason,
   enforcement point, safe authority evidence, and side-effect status
 - Local/demo-only Security Lab that exercises the real RuntimeGateway for

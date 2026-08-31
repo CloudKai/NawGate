@@ -32,6 +32,7 @@ export interface AgentTeamGrant {
 // Keep the policy contract visible in every meaningful decision trail. A
 // version bump is required when the authorization semantics change.
 export const AGENTGATE_POLICY_VERSION = "bouncer-v4";
+export const AGENTGATE_POLICY_REVISION = AGENTGATE_POLICY_VERSION;
 
 export interface HumanPrincipal {
   id: HumanId;
@@ -42,15 +43,50 @@ export type AgentGateAction =
   | "resource.read"
   | "file.read"
   | "deploy.staging"
-  | "deploy.production";
+  | "deploy.production"
+  | ContentAction;
 
 export type ResourceClassification = "internal" | "sensitive" | "restricted";
+
+export type ContentPurpose =
+  | "safety_moderation"
+  | "creator_requested_publish"
+  | "approved_analytics"
+  | "compliance_archive";
+
+export type ContentAction =
+  | "content.moderate"
+  | "content.disclose"
+  | "content.publish"
+  | "content.export";
+
+export interface ContentActionBinding {
+  purpose: ContentPurpose;
+  organizationId: string;
+  businessCenterId: string;
+  accountId: string;
+  assetId: string;
+  contentVersion: string;
+}
+
+export interface ContentScopeGrant {
+  id: string;
+  humanId: HumanId;
+  organizationId: string;
+  businessCenterId: string;
+  accountId: string;
+  assetIds: string[];
+  allowedActions: Extract<AgentGateAction, "content.disclose">[];
+  allowedPurposes: Extract<ContentPurpose, "approved_analytics">[];
+  destinations: string[];
+}
 
 export interface ProjectProfileResource {
   id: string;
   type: "project_profile";
   ownerUserId: HumanId;
   classification: "sensitive" | "internal";
+  revision: number;
 }
 
 export interface DeploymentTargetResource {
@@ -58,6 +94,7 @@ export interface DeploymentTargetResource {
   type: "deployment_target";
   ownerUserId: HumanId;
   classification: "sensitive" | "internal";
+  revision: number;
 }
 
 export interface TeamFileResource {
@@ -68,12 +105,27 @@ export interface TeamFileResource {
   teamId: TeamId | string;
   classification: "internal" | "restricted";
   minimumRole: TeamRole | string;
+  revision: number;
+}
+
+export interface ContentAssetResource {
+  id: string;
+  type: "content_asset";
+  ownerUserId: HumanId;
+  classification: "sensitive" | "restricted";
+  revision: number;
+  organizationId: string;
+  businessCenterId: string;
+  accountId: string;
+  assetId: string;
+  contentVersion: string;
 }
 
 export type ProtectedResource =
   | ProjectProfileResource
   | DeploymentTargetResource
-  | TeamFileResource;
+  | TeamFileResource
+  | ContentAssetResource;
 
 export type PolicyEnvironment = "local" | "staging" | "production";
 
@@ -85,6 +137,7 @@ export interface PolicySubjectAttributes {
   runId: string;
   memberships: readonly TeamMembership[];
   agentGrants: readonly AgentTeamGrant[];
+  contentScopes: readonly ContentScopeGrant[];
 }
 
 export interface PolicyObjectAttributes {
@@ -93,6 +146,8 @@ export interface PolicyObjectAttributes {
 
 export interface PolicyActionAttributes {
   name: string;
+  contentBinding?: ContentActionBinding;
+  destination?: string | null;
 }
 
 export interface PolicyEnvironmentAttributes {
@@ -123,13 +178,25 @@ export type PolicyDenyReasonCode =
   | "agent_grant_role_insufficient"
   | "restricted_file_requires_temporary_elevation"
   | "runtime_authority_revoked"
-  | "action_resource_mismatch";
+  | "action_resource_mismatch"
+  | "resource_revision_changed"
+  | "content_purpose_mismatch"
+  | "content_asset_mismatch"
+  | "content_version_mismatch"
+  | "content_scope_missing"
+  | "content_destination_unknown"
+  | "content_destination_mismatch";
 
 export type PolicyDecision =
   | {
       outcome: "allow";
       risk: "low" | "medium";
-      reasonCode: "owned_resource_read" | "owned_staging_deploy" | "team_file_read";
+      reasonCode:
+        | "owned_resource_read"
+        | "owned_staging_deploy"
+        | "team_file_read"
+        | "content_moderation_allowed"
+        | "content_disclosure_allowed";
     }
   | {
       outcome: "deny";
@@ -141,7 +208,9 @@ export type PolicyDecision =
       risk: "high";
       reasonCode:
         | "production_deploy_requires_owner_approval"
-        | "restricted_file_requires_temporary_elevation";
+        | "restricted_file_requires_temporary_elevation"
+        | "content_publish_requires_owner_approval"
+        | "content_export_requires_owner_approval";
     };
 
 export interface PolicyEngine {
@@ -164,6 +233,8 @@ export interface GatewayRequest {
   action: AgentGateAction;
   resourceId: string;
   approvalId?: string;
+  payload?: unknown;
+  destination?: string | null;
 }
 
 export type GatewayDenyReasonCode =
@@ -198,7 +269,9 @@ export type GatewayResult =
       risk: "high";
       reasonCode:
         | "production_deploy_requires_owner_approval"
-        | "restricted_file_requires_temporary_elevation";
+        | "restricted_file_requires_temporary_elevation"
+        | "content_publish_requires_owner_approval"
+        | "content_export_requires_owner_approval";
     }
   | {
       status: "failed";
@@ -237,6 +310,10 @@ export interface ApprovalRecord {
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
+  payloadDigest: string | null;
+  destination: string | null;
+  policyRevision: string | null;
+  resourceRevision: number | null;
   grantId?: string;
   teamId?: TeamId;
   bundleVersion?: number;
@@ -259,6 +336,10 @@ export interface CapabilityLease {
   issuedAt: string;
   expiresAt: string;
   remainingUses: 1 | 0;
+  payloadDigest: string;
+  destination: string | null;
+  policyRevision: string;
+  resourceRevision: number;
   grantId?: string;
   teamId?: TeamId;
   bundleVersion?: number;
@@ -268,6 +349,11 @@ export interface CapabilityLease {
   resourceClassification?: ResourceClassification;
   temporaryScope?: string[];
 }
+
+// This is the durable, non-secret claim material. It intentionally contains
+// no bearer credential or protected payload; CapabilityLease is the safe
+// result returned to the gateway after an atomic store transition.
+export type CapabilityClaim = CapabilityLease;
 
 export type AuditEventType =
   | "run.started"
@@ -335,6 +421,10 @@ export interface ActionExecutionRecord {
   requestId: string;
   action: AgentGateAction;
   resourceId: string;
+  payloadDigest: string | null;
+  destination: string | null;
+  policyRevision: string | null;
+  resourceRevision: number | null;
   status: "succeeded" | "failed";
   resultSummary?: unknown;
   completedAt: string;

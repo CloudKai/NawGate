@@ -56,8 +56,9 @@ separate Runtime dependency, not an authorization authority.
 2. `agentctl` submits a registered action through the Runtime gateway.
 3. The gateway denies unknown or cross-owner resources, allows low-risk owned
    reads/staging deploys, or creates a pending production approval.
-4. Only the owning human can approve. The capability is exact-bound and usable
-   once.
+4. Only the owning human can approve. The capability claim is exact-bound and
+   usable once; its canonical payload digest, optional destination, policy
+   revision, and resource revision are persisted with the claim metadata.
 5. Run completion, failure, cancellation, or explicit owner revocation removes
    runtime authority. Explicit revocation also invalidates pending and approved
    capabilities.
@@ -69,6 +70,29 @@ separate Runtime dependency, not an authorization authority.
    active Run authority.
 8. The gateway serializes protected side effects and re-resolves authority,
    memberships, grants, and resource metadata immediately before execution.
+
+## Purpose-bound synthetic content actions
+
+Phase 2 adds four registered, deterministic local actions to the same gateway:
+
+```text
+content.moderate  -> safety_moderation
+content.disclose  -> approved_analytics
+content.publish   -> creator_requested_publish
+content.export    -> compliance_archive
+```
+
+Each request carries a strict structured binding for the synthetic
+organisation, business centre, account, asset, and content version. The
+backend resolves the registered asset metadata and rejects any hierarchy,
+purpose, version, or destination mismatch. Moderation is processing-only and
+returns an aggregate result; raw protected content is returned only by
+`content.disclose` after an exact backend-approved disclosure scope matches
+the human, hierarchy, account, asset, purpose, and analytics destination.
+Publish and export pause for the existing owner approval flow, so the durable
+one-use capability remains bound to the full request payload and destination.
+The destinations and content are synthetic identifiers/data; no external
+TikTok or arbitrary URL calls are made.
 
 ## Bouncer v4: temporary JIT elevation
 
@@ -94,7 +118,9 @@ scope. It grants a single temporary read; it never mutates `AgentTeamGrant`.
 The gateway re-resolves the Run authority, human membership, persistent grant,
 resource metadata, policy, and exact capability immediately before the
 protected side effect. Revocation or changed authority at that point denies
-the queued action without executing it.
+the queued action without executing it. The `JsonStore` mutation that changes
+an approved claim to consumed also sets `remainingUses` to zero in the same
+atomic persisted transition, so a concurrent retry cannot consume it twice.
 
 ### Policy outcomes
 
@@ -108,19 +134,21 @@ the queued action without executing it.
   fail closed. Approval never repairs a hard deny.
 
 The resulting JIT capability is bound to one human, Agent, Run, request ID,
-action, resource, grant/bundle, and effective scope. It expires, is revocable,
-is consumed once, and does not turn a persistent viewer grant into an editor
-grant.
+action, resource, canonical payload digest, optional destination,
+grant/bundle, policy revision, resource revision, and effective scope. It
+expires, is revocable, is consumed once, and does not turn a persistent viewer
+grant into an editor grant.
 
 ## Revocation, replay, and final recheck
 
 Owner Run revocation invalidates the runtime credential and pending/approved
-capabilities. Agent Team Grant revocation likewise invalidates active Run
-authority and related capabilities. `RuntimeGateway` serializes protected
+capability claims. Agent Team Grant and protected-resource revision revocation
+likewise invalidate related claims. `RuntimeGateway` serializes protected
 execution and re-resolves mutable authority immediately before capability use
 and again adjacent to the registered protected side effect. This blocks a
 queued initial allow after authority has changed. Stored execution records make
-same-request retries idempotent and reject request substitution conflicts.
+same-request retries idempotent and reject payload/destination/request
+substitution conflicts.
 
 ## Audit and Delegation Receipt
 

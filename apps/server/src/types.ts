@@ -56,7 +56,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 4;
+  version: 5;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -67,6 +67,7 @@ export interface Database {
   actionExecutions: ActionExecutionRecord[];
   teamMemberships: TeamMembership[];
   agentTeamGrants: AgentTeamGrant[];
+  capabilityClaims: import("./agentgate/types.js").CapabilityClaim[];
 }
 
 export interface CreateAgentInput {

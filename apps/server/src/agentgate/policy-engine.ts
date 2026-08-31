@@ -1,6 +1,14 @@
+import {
+  expectedContentDestination,
+  isContentAction,
+  isContentPurpose,
+  isKnownContentDestination,
+} from "./content-model.js";
 import { isHumanId, isTeamId, isTeamRole } from "./demo-users.js";
 import type {
   AgentGateAction,
+  ContentActionBinding,
+  ContentScopeGrant,
   PolicyDecision,
   PolicyEngine,
   PolicyEnvironment,
@@ -15,7 +23,12 @@ const actions: readonly AgentGateAction[] = [
   "file.read",
   "deploy.staging",
   "deploy.production",
+  "content.moderate",
+  "content.disclose",
+  "content.publish",
+  "content.export",
 ];
+const grantActions = ["resource.read", "file.read", "deploy.staging", "deploy.production"] as const;
 
 const environments: readonly PolicyEnvironment[] = ["local", "staging", "production"];
 
@@ -48,8 +61,51 @@ function isValidMembership(value: unknown, humanId: unknown): boolean {
   );
 }
 
+function isValidContentBinding(value: unknown): value is ContentActionBinding {
+  return (
+    isRecord(value) &&
+    isContentPurpose(value.purpose) &&
+    isNonEmptyString(value.organizationId) &&
+    isNonEmptyString(value.businessCenterId) &&
+    isNonEmptyString(value.accountId) &&
+    isNonEmptyString(value.assetId) &&
+    isNonEmptyString(value.contentVersion)
+  );
+}
+
+function isValidContentScope(value: unknown, humanId: string): value is ContentScopeGrant {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.id) &&
+    value.humanId === humanId &&
+    isHumanId(value.humanId) &&
+    isNonEmptyString(value.organizationId) &&
+    isNonEmptyString(value.businessCenterId) &&
+    isNonEmptyString(value.accountId) &&
+    Array.isArray(value.assetIds) &&
+    value.assetIds.length > 0 &&
+    value.assetIds.every(isNonEmptyString) &&
+    Array.isArray(value.allowedActions) &&
+    value.allowedActions.length > 0 &&
+    value.allowedActions.every((action) => action === "content.disclose") &&
+    Array.isArray(value.allowedPurposes) &&
+    value.allowedPurposes.length > 0 &&
+    value.allowedPurposes.every((purpose) => purpose === "approved_analytics") &&
+    Array.isArray(value.destinations) &&
+    value.destinations.length > 0 &&
+    value.destinations.every((destination) => isKnownContentDestination(destination))
+  );
+}
+
 function isValidResourceShape(value: unknown): value is ProtectedResource {
-  if (!isRecord(value) || !isNonEmptyString(value.id) || typeof value.type !== "string") {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.id) ||
+    typeof value.type !== "string" ||
+    typeof value.revision !== "number" ||
+    !Number.isInteger(value.revision) ||
+    value.revision <= 0
+  ) {
     return false;
   }
   if (value.type === "team_file") {
@@ -60,6 +116,18 @@ function isValidResourceShape(value: unknown): value is ProtectedResource {
       (value.classification === "internal" || value.classification === "restricted") &&
       typeof value.minimumRole === "string" &&
       isTeamRole(value.minimumRole)
+    );
+  }
+  if (value.type === "content_asset") {
+    return (
+      typeof value.ownerUserId === "string" &&
+      isHumanId(value.ownerUserId) &&
+      (value.classification === "sensitive" || value.classification === "restricted") &&
+      isNonEmptyString(value.organizationId) &&
+      isNonEmptyString(value.businessCenterId) &&
+      isNonEmptyString(value.accountId) &&
+      isNonEmptyString(value.assetId) &&
+      isNonEmptyString(value.contentVersion)
     );
   }
   return (
@@ -81,7 +149,9 @@ function isValidGrantShape(value: unknown, agentId: string): value is AgentTeamG
     typeof value.role === "string" &&
     isTeamRole(value.role) &&
     Array.isArray(value.allowedActions) &&
-    value.allowedActions.every(isKnownAction) &&
+    value.allowedActions.every((action) =>
+      typeof action === "string" && grantActions.includes(action as (typeof grantActions)[number]),
+    ) &&
     (value.status === "active" || value.status === "revoked") &&
     typeof value.approvedBy === "string" && isHumanId(value.approvedBy) &&
     (value.expiresAt === null ||
@@ -127,12 +197,19 @@ function isValidAttributeShape(input: unknown): input is PolicyInput {
     ) ||
     !Array.isArray(subject.agentGrants) ||
     !subject.agentGrants.every((grant) => isValidGrantShape(grant, agentId)) ||
+    !Array.isArray(subject.contentScopes) ||
+    !subject.contentScopes.every((scope) => isValidContentScope(scope, subject.humanId as string)) ||
     !isValidResourceShape(object.resource) ||
     !isNonEmptyString(action.name) ||
+    (action.contentBinding !== undefined && !isValidContentBinding(action.contentBinding)) ||
+    (action.destination !== undefined &&
+      action.destination !== null &&
+      !isNonEmptyString(action.destination)) ||
     !isKnownEnvironment(environment.name)
   ) {
     return false;
   }
+  if (isContentAction(action.name) && action.contentBinding === undefined) return false;
   return true;
 }
 
@@ -248,6 +325,100 @@ function teamFileDecision(input: PolicyInput, now: number): PolicyDecision {
   };
 }
 
+function contentDecision(input: PolicyInput): PolicyDecision {
+  const resource = input.object.resource;
+  if (resource.type !== "content_asset") {
+    return { outcome: "deny", risk: "high", reasonCode: "action_resource_mismatch" };
+  }
+  if (input.environment.name !== "local") {
+    return { outcome: "deny", risk: "high", reasonCode: "action_resource_mismatch" };
+  }
+  if (input.subject.humanId !== resource.ownerUserId) {
+    return { outcome: "deny", risk: "high", reasonCode: "resource_owner_mismatch" };
+  }
+  const binding = input.action.contentBinding;
+  if (!binding) {
+    return { outcome: "deny", risk: "high", reasonCode: "malformed_attributes" };
+  }
+  if (
+    binding.organizationId !== resource.organizationId ||
+    binding.businessCenterId !== resource.businessCenterId ||
+    binding.accountId !== resource.accountId ||
+    binding.assetId !== resource.assetId
+  ) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_asset_mismatch" };
+  }
+  if (binding.contentVersion !== resource.contentVersion) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_version_mismatch" };
+  }
+
+  const action = input.action.name as AgentGateAction;
+  const destination = input.action.destination ?? null;
+  const expectedPurpose =
+    action === "content.moderate"
+      ? "safety_moderation"
+      : action === "content.publish"
+        ? "creator_requested_publish"
+        : action === "content.disclose"
+          ? "approved_analytics"
+          : "compliance_archive";
+  if (binding.purpose !== expectedPurpose) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_purpose_mismatch" };
+  }
+
+  if (action === "content.moderate") {
+    if (destination !== null) {
+      return {
+        outcome: "deny",
+        risk: "high",
+        reasonCode: isKnownContentDestination(destination)
+          ? "content_destination_mismatch"
+          : "content_destination_unknown",
+      };
+    }
+    return { outcome: "allow", risk: "low", reasonCode: "content_moderation_allowed" };
+  }
+
+  const expectedDestination = expectedContentDestination(
+    action as "content.disclose" | "content.publish" | "content.export",
+    resource.accountId,
+    resource.organizationId,
+  );
+  if (!isKnownContentDestination(destination)) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_unknown" };
+  }
+  if (!expectedDestination || destination !== expectedDestination) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_mismatch" };
+  }
+
+  if (action === "content.disclose") {
+    const scope = input.subject.contentScopes.find(
+      (candidate) =>
+        candidate.humanId === input.subject.humanId &&
+        candidate.organizationId === resource.organizationId &&
+        candidate.businessCenterId === resource.businessCenterId &&
+        candidate.accountId === resource.accountId &&
+        candidate.assetIds.includes(resource.assetId) &&
+        candidate.allowedActions.includes("content.disclose") &&
+        candidate.allowedPurposes.includes("approved_analytics") &&
+        candidate.destinations.includes(destination),
+    );
+    if (!scope) {
+      return { outcome: "deny", risk: "high", reasonCode: "content_scope_missing" };
+    }
+    return { outcome: "allow", risk: "medium", reasonCode: "content_disclosure_allowed" };
+  }
+
+  return {
+    outcome: "require_approval",
+    risk: "high",
+    reasonCode:
+      action === "content.publish"
+        ? "content_publish_requires_owner_approval"
+        : "content_export_requires_owner_approval",
+  };
+}
+
 export class DeterministicPolicyEngine implements PolicyEngine {
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -274,6 +445,10 @@ export class DeterministicPolicyEngine implements PolicyEngine {
 
     if (input.object.resource.type === "team_file") {
       return teamFileDecision(input, this.now());
+    }
+
+    if (isContentAction(input.action.name)) {
+      return contentDecision(input);
     }
 
     // Existing user-owned resources retain their hard cross-user boundary.

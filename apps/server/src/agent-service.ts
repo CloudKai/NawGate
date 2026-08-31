@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isModelConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import type { ApprovalService } from "./agentgate/approval-service.js";
 import type { HumanPrincipal } from "./agentgate/types.js";
 import { JsonStore } from "./store.js";
 import type {
@@ -25,14 +26,17 @@ export class AgentService {
     private readonly store: JsonStore,
     private readonly workspaces: WorkspaceManager,
     private readonly runner: AgentRunner,
+    private readonly approvals?: ApprovalService,
   ) {}
 
   async initialize(): Promise<void> {
     await this.store.initialize();
     await this.workspaces.initialize();
+    const interruptedRunIds: string[] = [];
     await this.store.mutate((database) => {
       for (const run of database.runs) {
         if (run.status === "queued" || run.status === "running") {
+          interruptedRunIds.push(run.id);
           run.status = "cancelled";
           run.error = "Server restarted while this run was active";
           run.completedAt = now();
@@ -45,6 +49,9 @@ export class AgentService {
         }
       }
     });
+    for (const runId of interruptedRunIds) {
+      await this.approvals?.revokeForRun(runId, "server_restarted");
+    }
   }
 
   listAgents(actor: HumanPrincipal): Agent[] {
@@ -118,7 +125,13 @@ export class AgentService {
     actor: HumanPrincipal,
   ): Promise<{ archivedWorkspace: string }> {
     const agent = this.getAgent(id, actor);
+    const runIds = this.store.snapshot().runs
+      .filter((run) => run.agentId === id && (run.status === "queued" || run.status === "running"))
+      .map((run) => run.id);
     await this.cancelExecution(id);
+    for (const runId of runIds) {
+      await this.approvals?.revokeForRun(runId, "agent_deleted");
+    }
     const archivedWorkspace = await this.workspaces.archive(agent);
     const deletedAt = now();
     await this.store.mutate((database) => {
@@ -143,7 +156,9 @@ export class AgentService {
 
   async stopAgent(id: string, actor: HumanPrincipal): Promise<Agent> {
     this.getAgent(id, actor);
+    const activeRunId = this.getActiveRun(id, actor)?.id;
     await this.cancelExecution(id);
+    if (activeRunId) await this.approvals?.revokeForRun(activeRunId, "run_cancelled");
     return this.setStatus(id, "stopped", actor);
   }
 
@@ -339,6 +354,8 @@ export class AgentService {
           agent.updatedAt = completedAt;
         }
       });
+    } finally {
+      await this.approvals?.revokeForRun(run.id, "run_finished");
     }
   }
 

@@ -194,6 +194,9 @@ export class AgentTeamGrantService implements AgentGrantResolver {
       this.credentials?.revokeAuthority(runId);
       await this.approvals?.revokeForRun(runId, "agent_grant_revoked");
     }
+    // Invalidate every outstanding claim for this grant, including claims
+    // created by a Run that is no longer present in the active-run list.
+    await this.approvals?.revokeForGrant(grantId, "agent_grant_revoked");
     if (outcome.changed && this.audit) {
       await this.audit.record({
         eventType: "agent_grant.revoked",

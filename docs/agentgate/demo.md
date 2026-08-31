@@ -20,7 +20,8 @@ Open `http://localhost:3000` and use the side panel:
    no deployment occurs before approval.
 5. Switch to User B and confirm the Agent and approval are not visible.
 6. Switch back to User A, approve once, and confirm `CAPABILITY ISSUED`,
-   `CAPABILITY CONSUMED`, and one successful protected action.
+   `CAPABILITY CONSUMED`, and one successful protected action. The claim is
+   payload-bound and durable, but the payload itself is never shown or stored.
 7. Use **Revoke access** during an active Run when demonstrating the kill path;
    subsequent gateway requests receive an invalid runtime credential response.
 8. In the **Security Lab**, run **Own project**, **Cross-user deny**, and
@@ -69,6 +70,25 @@ agentctl file read team-beta-internal
 
 The audit timeline should retain the registered file identifier and policy
 reason while never containing the synthetic file payload.
+
+## Synthetic content rehearsal
+
+The same RuntimeGateway also accepts deterministic content commands from the
+Runtime `agentctl`:
+
+```bash
+agentctl content moderate asset-user-a-video-1
+agentctl content disclose asset-user-a-video-1
+agentctl content publish asset-user-a-video-1
+agentctl content export asset-user-a-video-1
+```
+
+Moderation returns only an aggregate result. Disclosure is limited to the
+backend-approved analytics scope for User A's exact asset. Publish and export
+show the normal owner approval card and consume one exact capability. The
+organisation, business centre, account, asset, purpose, content version, and
+registered synthetic destination are fixed by the server-side demo model; no
+external TikTok request or arbitrary URL is involved.
 
 The **Replay capability** Security Lab scenario runs the first approved JIT
 read, then attempts a fresh-request replay with the consumed capability. It

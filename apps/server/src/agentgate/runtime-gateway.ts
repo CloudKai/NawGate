@@ -5,7 +5,13 @@ import {
 } from "./approval-service.js";
 import { AuditService } from "./audit-service.js";
 import { AgentTeamGrantService, type AgentGrantResolver } from "./agent-team-grant-service.js";
+import { canonicalPayloadDigest } from "./canonical-json.js";
 import { isHumanId, isTeamId } from "./demo-users.js";
+import {
+  demoContentScopes,
+  isContentAction,
+  parseContentActionBinding,
+} from "./content-model.js";
 import { TeamMembershipService, type MembershipResolver } from "./team-membership-service.js";
 import type { JsonStore } from "../store.js";
 import type {
@@ -16,6 +22,7 @@ import type {
   GatewayRequest,
   GatewayResult,
   PolicyEngine,
+  PolicyActionAttributes,
   PolicyDecision,
   ProtectedActionResult,
   ProtectedResource,
@@ -30,7 +37,14 @@ interface ProtectedResourceBoundary {
   execute(
     action: AgentGateAction,
     resourceId: string,
-    execution?: { runId: string; requestId: string },
+    execution?: {
+      runId: string;
+      requestId: string;
+      payloadDigest: string;
+      destination: string | null;
+      policyRevision: string;
+      resourceRevision: number;
+    },
   ): Promise<ProtectedActionResult>;
 }
 
@@ -69,16 +83,27 @@ function isRuntimeContext(value: unknown): value is TrustedRuntimeContext {
 }
 
 function isGatewayRequest(value: unknown): value is GatewayRequest {
-  return (
-    isRecord(value) &&
-    Object.keys(value).every((key) =>
-      key === "requestId" || key === "action" || key === "resourceId" || key === "approvalId",
-    ) &&
-    isNonEmptyString(value.requestId) &&
-    isNonEmptyString(value.action) &&
-    isNonEmptyString(value.resourceId) &&
-    (value.approvalId === undefined || isNonEmptyString(value.approvalId))
-  );
+  if (
+    !isRecord(value) ||
+    !Object.keys(value).every((key) =>
+      key === "requestId" || key === "action" || key === "resourceId" ||
+      key === "approvalId" || key === "payload" || key === "destination",
+    ) ||
+    !isNonEmptyString(value.requestId) ||
+    !isNonEmptyString(value.action) ||
+    !isNonEmptyString(value.resourceId) ||
+    (value.approvalId !== undefined && !isNonEmptyString(value.approvalId)) ||
+    (value.destination !== undefined && value.destination !== null &&
+      (!isNonEmptyString(value.destination) || value.destination.length > 256))
+  ) {
+    return false;
+  }
+  try {
+    canonicalPayloadDigest(value.payload);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isRegisteredAction(value: string): value is AgentGateAction {
@@ -86,7 +111,11 @@ function isRegisteredAction(value: string): value is AgentGateAction {
     value === "resource.read" ||
     value === "file.read" ||
     value === "deploy.staging" ||
-    value === "deploy.production"
+    value === "deploy.production" ||
+    value === "content.moderate" ||
+    value === "content.disclose" ||
+    value === "content.publish" ||
+    value === "content.export"
   );
 }
 
@@ -96,12 +125,25 @@ function environmentFor(action: string): "local" | "staging" | "production" {
   return "local";
 }
 
+function policyActionAttributes(request: GatewayRequest): PolicyActionAttributes {
+  if (!isContentAction(request.action)) return { name: request.action };
+  const contentBinding = parseContentActionBinding(request.payload);
+  return {
+    name: request.action,
+    ...(contentBinding ? { contentBinding } : {}),
+    destination: request.destination ?? null,
+  };
+}
+
 function auditDecisionFor(outcome: PolicyDecision["outcome"]): AuditDecision {
   return outcome;
 }
 
 function riskFor(action: AgentGateAction): "low" | "medium" | "high" {
   if (action === "resource.read") return "low";
+  if (action === "content.moderate") return "low";
+  if (action === "content.disclose") return "medium";
+  if (action === "content.publish" || action === "content.export") return "high";
   return action === "deploy.production" ? "high" : "medium";
 }
 
@@ -170,6 +212,39 @@ function explanationFor(
   }
   if (reasonCode === "runtime_authority_revoked") {
     return "The Run authority is no longer active; the protected action was not executed.";
+  }
+  if (reasonCode === "resource_revision_changed") {
+    return "The protected resource changed after authorization; the stale capability was not executed.";
+  }
+  if (reasonCode === "content_moderation_allowed") {
+    return "The Agent is authorized to process this owned content asset for safety moderation; only an aggregate result is returned.";
+  }
+  if (reasonCode === "content_disclosure_allowed") {
+    return "An explicit backend-approved analytics scope authorizes disclosure of this exact content asset.";
+  }
+  if (reasonCode === "content_purpose_mismatch") {
+    return "The declared content purpose is not permitted for this registered content action.";
+  }
+  if (reasonCode === "content_asset_mismatch") {
+    return "The declared organisation, business centre, account, or asset does not match the registered content resource.";
+  }
+  if (reasonCode === "content_version_mismatch") {
+    return "The protected content changed after the request was formed; the stale content binding was denied.";
+  }
+  if (reasonCode === "content_scope_missing") {
+    return "Disclosure requires an explicit backend-approved scope for this exact account and asset.";
+  }
+  if (reasonCode === "content_destination_unknown") {
+    return "The content destination is not a registered synthetic destination.";
+  }
+  if (reasonCode === "content_destination_mismatch") {
+    return "The content destination does not match the registered account or organisation scope.";
+  }
+  if (reasonCode === "content_publish_requires_owner_approval") {
+    return "Publishing content is high risk and requires explicit owner approval before the protected side effect.";
+  }
+  if (reasonCode === "content_export_requires_owner_approval") {
+    return "Exporting content to compliance archive is high risk and requires explicit owner approval before the protected side effect.";
   }
   if (reasonCode === "malformed_attributes") {
     return "The subject, object, action, or environment attributes were malformed.";
@@ -270,6 +345,7 @@ export class RuntimeGateway {
         reasonCode: "invalid_context",
       };
     }
+    const payloadDigest = canonicalPayloadDigest(request.payload);
 
     if (this.authority && !this.authority.isAuthorityActive(context)) {
       await this.recordPolicyDecision(
@@ -319,9 +395,10 @@ export class RuntimeGateway {
         runId: context.runId,
         memberships,
         agentGrants: grants,
+        contentScopes: demoContentScopes(context.humanId),
       },
       object: { resource },
-      action: { name: request.action },
+      action: policyActionAttributes(request),
       environment: { name: environmentFor(request.action) },
     });
     await this.recordPolicyDecision(
@@ -345,11 +422,17 @@ export class RuntimeGateway {
     }
 
     return this.serializeExecution(async () => {
+      let capabilityResourceRevision: number | undefined;
       const existing = this.findExecution(context.runId, request.requestId);
       if (existing) {
         if (
           existing.action !== request.action ||
-          existing.resourceId !== request.resourceId
+          existing.resourceId !== request.resourceId ||
+          existing.payloadDigest === null ||
+          existing.destination !== (request.destination ?? null) ||
+          existing.payloadDigest !== payloadDigest ||
+          existing.policyRevision === null ||
+          existing.resourceRevision === null
         ) {
           return {
             status: "conflict",
@@ -414,9 +497,10 @@ export class RuntimeGateway {
           runId: context.runId,
           memberships: finalMemberships,
           agentGrants: finalGrants,
+          contentScopes: demoContentScopes(context.humanId),
         },
         object: { resource: finalResource },
-        action: { name: request.action },
+        action: policyActionAttributes(request),
         environment: { name: environmentFor(request.action) },
       });
       if (finalDecision.outcome === "deny") {
@@ -448,6 +532,10 @@ export class RuntimeGateway {
           action: request.action,
           resourceId: request.resourceId,
           reasonCode: currentDecision.reasonCode,
+          payload: request.payload,
+          destination: request.destination ?? null,
+          policyRevision: AGENTGATE_POLICY_VERSION,
+          resourceRevision: finalResource.revision,
           ...this.grantEvidence(
             finalResource,
             finalGrants,
@@ -545,9 +633,16 @@ export class RuntimeGateway {
           };
         }
         request = { ...request, approvalId: consumption.capability.approvalId };
+        capabilityResourceRevision = consumption.capability.resourceRevision;
       }
 
-      return this.executeProtected(context, request, startedAt);
+      return this.executeProtected(
+        context,
+        request,
+        startedAt,
+        payloadDigest,
+        capabilityResourceRevision,
+      );
     });
   }
 
@@ -555,6 +650,8 @@ export class RuntimeGateway {
     context: TrustedRuntimeContext,
     request: GatewayRequest,
     startedAt: number,
+    payloadDigest: string,
+    capabilityResourceRevision?: number,
   ): Promise<GatewayResult> {
     // This is intentionally a second policy boundary immediately adjacent to
     // the side effect. The earlier decision may have waited on the execution
@@ -593,9 +690,10 @@ export class RuntimeGateway {
         runId: context.runId,
         memberships,
         agentGrants: grants,
+        contentScopes: demoContentScopes(context.humanId),
       },
       object: { resource },
-      action: { name: request.action },
+      action: policyActionAttributes(request),
       environment: { name: environmentFor(request.action) },
     });
     if (finalDecision.outcome === "deny") {
@@ -609,10 +707,45 @@ export class RuntimeGateway {
         memberships,
       );
     }
+    // Re-read the resource after the final policy evaluation. A resource
+    // revision can change while policy is evaluating or immediately after an
+    // approval claim is consumed. A consumed capability is still unusable if
+    // its bound revision is stale, and no protected boundary is called.
+    const latestResource = this.resources.getMetadata(request.resourceId);
+    if (!latestResource) {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        null,
+        grants,
+        { outcome: "deny", risk: "high", reasonCode: "unknown_resource" },
+        startedAt,
+        memberships,
+      );
+    }
+    if (
+      latestResource.revision !== resource.revision ||
+      (capabilityResourceRevision !== undefined &&
+        latestResource.revision !== capabilityResourceRevision)
+    ) {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        latestResource,
+        grants,
+        { outcome: "deny", risk: "high", reasonCode: "resource_revision_changed" },
+        startedAt,
+        memberships,
+      );
+    }
     try {
       const result = await this.resources.execute(request.action, request.resourceId, {
         runId: context.runId,
         requestId: request.requestId,
+        payloadDigest,
+        destination: request.destination ?? null,
+        policyRevision: AGENTGATE_POLICY_VERSION,
+        resourceRevision: latestResource.revision,
       });
       await this.audit.record({
         eventType: "protected_action.succeeded",
@@ -649,6 +782,10 @@ export class RuntimeGateway {
           requestId: request.requestId,
           action: request.action,
           resourceId: request.resourceId,
+          payloadDigest,
+          destination: request.destination ?? null,
+          policyRevision: AGENTGATE_POLICY_VERSION,
+          resourceRevision: latestResource.revision,
           status: "failed",
           resultSummary: { summary: "Protected action failed" },
           completedAt: new Date().toISOString(),

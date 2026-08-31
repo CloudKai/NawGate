@@ -21,10 +21,10 @@ await writeCodexConfig(config);
 const store = new JsonStore(path.join(config.dataDirectory, "launchpad.json"));
 const workspaces = new WorkspaceManager(config.workspaceRoot);
 const audit = new AuditService(store);
-const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const approvals = new ApprovalService(store, audit);
+const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
-const resources = new ProtectedResourceService(store);
+const resources = new ProtectedResourceService(store, approvals);
 const gateway = new RuntimeGateway(
   new DeterministicPolicyEngine(),
   resources,
@@ -36,9 +36,9 @@ const gateway = new RuntimeGateway(
   credentials,
 );
 const securityLab = new SecurityLabService(gateway, approvals, audit, credentials, grants);
-const runner = createRunner(config, store, { credentials, audit });
+const runner = createRunner(config, store, { credentials, audit, approvals });
 const identity = new IdentityService();
-const service = new AgentService(config, store, workspaces, runner);
+const service = new AgentService(config, store, workspaces, runner, approvals);
 await service.initialize();
 
 const app = await createApp(config, service, identity, {

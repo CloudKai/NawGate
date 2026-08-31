@@ -38,9 +38,20 @@ const demoSessionBody = z.object({
 }).strict();
 const runtimeActionBody = z.object({
   requestId: z.string().uuid(),
-  action: z.enum(["resource.read", "file.read", "deploy.staging", "deploy.production"]),
+  action: z.enum([
+    "resource.read",
+    "file.read",
+    "deploy.staging",
+    "deploy.production",
+    "content.moderate",
+    "content.disclose",
+    "content.publish",
+    "content.export",
+  ]),
   resourceId: z.string().min(1).max(120),
   approvalId: z.string().uuid().optional(),
+  payload: z.unknown().optional(),
+  destination: z.string().trim().min(1).max(256).nullable().optional(),
 }).strict();
 const runtimeApprovalParams = z.object({ id: z.string().uuid() });
 const approvalQuery = z.object({
@@ -106,7 +117,7 @@ function publicGatewayCode(reasonCode: string): string {
 function rejectedRuntimeFieldNames(error: z.ZodError): string[] {
   const safeNames = new Set([
     "requestId", "action", "resourceId", "approvalId", "humanId", "ownerUserId", "agentId", "runId",
-    "teamId", "role", "memberships", "agentGrants", "policyOutcome",
+    "teamId", "role", "memberships", "agentGrants", "policyOutcome", "payload", "destination",
   ]);
   const names = new Set<string>();
   for (const issue of error.issues) {
@@ -411,6 +422,8 @@ export async function createApp(
         action: body.action,
         resourceId: body.resourceId,
         ...(body.approvalId ? { approvalId: body.approvalId } : {}),
+        ...(body.payload !== undefined ? { payload: body.payload } : {}),
+        ...(body.destination !== undefined ? { destination: body.destination } : {}),
       });
       return sendRuntimeResult(reply, result);
     });

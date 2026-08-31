@@ -19,17 +19,48 @@ const teamFiles = new Map<string, string>([
   ["team-beta-internal", "Synthetic internal Team Beta file."],
 ]);
 
+// Synthetic TikTok-oriented content is kept behind this service boundary.
+// It is never copied into Agent workspaces or audit records.
+const contentAssets = new Map<string, {
+  content: string;
+  moderationSummary: string;
+}>([
+  ["asset-user-a-video-1", {
+    content: "Synthetic User A short-form video payload.",
+    moderationSummary: "safe=true; findings=0; aggregate-only",
+  }],
+  ["asset-user-a-video-2", {
+    content: "Synthetic User A second short-form video payload.",
+    moderationSummary: "safe=true; findings=1; aggregate-only",
+  }],
+  ["asset-user-b-video-1", {
+    content: "Synthetic User B short-form video payload.",
+    moderationSummary: "safe=false; findings=2; aggregate-only",
+  }],
+]);
+
 export class ProtectedResourceError extends Error {}
+
+export interface ResourceClaimInvalidator {
+  revokeForResource(resourceId: string, reasonCode?: string): Promise<unknown>;
+}
 
 interface ExecutionContext {
   runId: string;
   requestId: string;
+  payloadDigest: string;
+  destination: string | null;
+  policyRevision: string;
+  resourceRevision: number;
 }
 
 export class ProtectedResourceService {
   private readonly executions = new Map<string, number>();
 
-  constructor(private readonly store: JsonStore) {}
+  constructor(
+    private readonly store: JsonStore,
+    private readonly claims?: ResourceClaimInvalidator,
+  ) {}
 
   getMetadata(resourceId: string): ProtectedResource | null {
     const resource = this.store
@@ -47,6 +78,43 @@ export class ProtectedResourceService {
     if (!resource) {
       throw new ProtectedResourceError("Protected resource not found");
     }
+    if (execution && resource.revision !== execution.resourceRevision) {
+      throw new ProtectedResourceError("Protected resource revision changed");
+    }
+
+    if (action.startsWith("content.")) {
+      if (resource.type !== "content_asset") {
+        throw new ProtectedResourceError("Protected resource does not support content actions");
+      }
+      const asset = contentAssets.get(resource.assetId);
+      if (!asset) throw new ProtectedResourceError("Protected content not found");
+      const expectedResourceRevision = execution?.resourceRevision ?? resource.revision;
+      if (action === "content.moderate") {
+        await this.persistExecution(execution, action, resourceId, expectedResourceRevision, {
+          summary: "Content moderation aggregate for " + resource.assetId,
+        });
+        this.recordExecution(action, resourceId);
+        return {
+          summary: "Content moderation aggregate for " + resource.assetId + ": " + asset.moderationSummary,
+        };
+      }
+      if (action === "content.disclose") {
+        await this.persistExecution(execution, action, resourceId, expectedResourceRevision, {
+          summary: "Disclosed approved content for " + resource.assetId,
+        });
+        this.recordExecution(action, resourceId);
+        return {
+          summary: "Disclosed approved content for " + resource.assetId,
+          content: asset.content,
+        };
+      }
+      const summary = action === "content.publish"
+        ? "Published content for " + resource.assetId
+        : "Exported content for " + resource.assetId;
+      await this.persistExecution(execution, action, resourceId, expectedResourceRevision, { summary });
+      this.recordExecution(action, resourceId);
+      return { summary };
+    }
 
     if (action === "resource.read") {
       if (resource.type !== "project_profile") {
@@ -56,7 +124,7 @@ export class ProtectedResourceService {
       if (!content) {
         throw new ProtectedResourceError("Protected resource content not found");
       }
-      await this.persistExecution(execution, action, resourceId, {
+      await this.persistExecution(execution, action, resourceId, undefined, {
         summary: "Read protected project profile " + resourceId,
       });
       this.recordExecution(action, resourceId);
@@ -71,7 +139,7 @@ export class ProtectedResourceService {
       if (!content) {
         throw new ProtectedResourceError("Protected file content not found");
       }
-      await this.persistExecution(execution, action, resourceId, {
+      await this.persistExecution(execution, action, resourceId, undefined, {
         summary: "Read protected team file " + resourceId,
       });
       this.recordExecution(action, resourceId);
@@ -83,7 +151,18 @@ export class ProtectedResourceService {
     }
     const environment = action === "deploy.staging" ? "staging" : "production";
     const deployedVersion = "demo-" + Date.now();
+    const expectedResourceRevision = execution?.resourceRevision ?? resource.revision;
     await this.store.mutate((database) => {
+      // The initial metadata check above is intentionally not sufficient:
+      // another serialized mutation can bump the resource after that read
+      // and before this callback runs. Verify the expected revision inside
+      // the same transaction that mutates deployment state.
+      const currentResource = database.protectedResources.find(
+        (candidate) => candidate.id === resourceId,
+      );
+      if (!currentResource || currentResource.revision !== expectedResourceRevision) {
+        throw new ProtectedResourceError("Protected resource revision changed");
+      }
       const state = database.deploymentStates.find(
         (candidate) =>
           candidate.resourceId === resourceId && candidate.environment === environment,
@@ -98,6 +177,10 @@ export class ProtectedResourceService {
         database.actionExecutions.push({
           runId: execution.runId,
           requestId: execution.requestId,
+          payloadDigest: execution.payloadDigest,
+          destination: execution.destination,
+          policyRevision: execution.policyRevision,
+          resourceRevision: execution.resourceRevision,
           action,
           resourceId,
           status: "succeeded",
@@ -124,6 +207,32 @@ export class ProtectedResourceService {
       );
   }
 
+  /**
+   * Resource revision changes are an explicit revocation boundary for
+   * outstanding approval claims. The resource remains registered so callers
+   * can observe and authorize its new revision.
+   */
+  async bumpRevision(
+    resourceId: string,
+    reasonCode = "resource_revision_changed",
+  ): Promise<ProtectedResource> {
+    const resource = await this.store.mutate((database) => {
+      const current = database.protectedResources.find((candidate) => candidate.id === resourceId);
+      if (!current) throw new ProtectedResourceError("Protected resource not found");
+      current.revision += 1;
+      return structuredClone(current);
+    });
+    await this.claims?.revokeForResource(resourceId, reasonCode);
+    return resource;
+  }
+
+  async revoke(
+    resourceId: string,
+    reasonCode = "resource_revoked",
+  ): Promise<ProtectedResource> {
+    return this.bumpRevision(resourceId, reasonCode);
+  }
+
   private recordExecution(action: AgentGateAction, resourceId: string): void {
     const key = this.executionKey(action, resourceId);
     this.executions.set(key, (this.executions.get(key) ?? 0) + 1);
@@ -133,14 +242,28 @@ export class ProtectedResourceService {
     execution: ExecutionContext | undefined,
     action: AgentGateAction,
     resourceId: string,
+    expectedResourceRevision: number | undefined,
     resultSummary: ActionExecutionRecord["resultSummary"],
   ): Promise<void> {
-    if (!execution) return;
+    if (!execution && expectedResourceRevision === undefined) return;
     await this.store.mutate((database) => {
+      if (expectedResourceRevision !== undefined) {
+        const currentResource = database.protectedResources.find(
+          (candidate) => candidate.id === resourceId,
+        );
+        if (!currentResource || currentResource.revision !== expectedResourceRevision) {
+          throw new ProtectedResourceError("Protected resource revision changed");
+        }
+      }
+      if (!execution) return;
       database.actionExecutions.push({
-        runId: execution.runId,
-        requestId: execution.requestId,
-        action,
+          runId: execution.runId,
+          requestId: execution.requestId,
+          payloadDigest: execution.payloadDigest,
+          destination: execution.destination,
+          policyRevision: execution.policyRevision,
+          resourceRevision: execution.resourceRevision,
+          action,
         resourceId,
         status: "succeeded",
         resultSummary,

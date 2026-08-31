@@ -12,9 +12,34 @@ const maxWaitMs = Number.isFinite(configuredWait) && configuredWait > 0
   ? configuredWait
   : 90_000;
 
+const contentAssets = {
+  "asset-user-a-video-1": {
+    organizationId: "org-user-a",
+    businessCenterId: "business-center-user-a",
+    accountId: "account-user-a",
+  },
+  "asset-user-a-video-2": {
+    organizationId: "org-user-a",
+    businessCenterId: "business-center-user-a",
+    accountId: "account-user-a",
+  },
+  "asset-user-b-video-1": {
+    organizationId: "org-user-b",
+    businessCenterId: "business-center-user-b",
+    accountId: "account-user-b",
+  },
+};
+
+const contentCommands = {
+  moderate: { action: "content.moderate", purpose: "safety_moderation", destination: null },
+  disclose: { action: "content.disclose", purpose: "approved_analytics", destinationFor: "analytics" },
+  publish: { action: "content.publish", purpose: "creator_requested_publish", destinationFor: "publish" },
+  export: { action: "content.export", purpose: "compliance_archive", destinationFor: "archive" },
+};
+
 function usage() {
   process.stderr.write(
-    "Usage: agentctl resource read <resource-id> | agentctl file read <resource-id> | agentctl deploy <staging|production>\n",
+    "Usage: agentctl resource read <resource-id> | agentctl file read <resource-id> | agentctl deploy <staging|production> | agentctl content <moderate|disclose|publish|export> <asset-id>\n",
   );
 }
 
@@ -38,6 +63,43 @@ function parseCommand(args) {
       action: "deploy.production",
       resourceId: "production",
       label: "deploy.production",
+    };
+  }
+  if (args.length === 3 && args[0] === "content") {
+    const definition = Object.hasOwn(contentCommands, args[1])
+      ? contentCommands[args[1]]
+      : null;
+    const asset = Object.hasOwn(contentAssets, args[2])
+      ? contentAssets[args[2]]
+      : null;
+    if (!definition || !asset) return null;
+    let destination;
+    if (definition.destinationFor === "analytics") {
+      destination = asset.accountId === "account-user-a"
+        ? "analytics:account-user-a"
+        : "analytics:account-user-b";
+    } else if (definition.destinationFor === "publish") {
+      destination = asset.accountId === "account-user-a"
+        ? "tiktok:publish:account-user-a"
+        : "tiktok:publish:account-user-b";
+    } else if (definition.destinationFor === "archive") {
+      destination = asset.organizationId === "org-user-a"
+        ? "compliance:archive:org-user-a"
+        : "compliance:archive:org-user-b";
+    }
+    return {
+      action: definition.action,
+      resourceId: args[2],
+      payload: {
+        purpose: definition.purpose,
+        organizationId: asset.organizationId,
+        businessCenterId: asset.businessCenterId,
+        accountId: asset.accountId,
+        assetId: args[2],
+        contentVersion: "v1",
+      },
+      ...(destination ? { destination } : {}),
+      label: definition.action + " " + args[2],
     };
   }
   return null;
@@ -95,6 +157,17 @@ function printSuccess(command, payload, approval) {
   process.stdout.write(detail + "\n");
 }
 
+function actionBody(command, requestId, approvalId) {
+  return {
+    requestId,
+    action: command.action,
+    resourceId: command.resourceId,
+    ...(command.payload !== undefined ? { payload: command.payload } : {}),
+    ...(command.destination !== undefined ? { destination: command.destination } : {}),
+    ...(approvalId ? { approvalId } : {}),
+  };
+}
+
 async function waitForApproval(command, requestId, approvalId) {
   process.stdout.write("Waiting for owner approval...\n");
   const deadline = Date.now() + maxWaitMs;
@@ -122,12 +195,7 @@ async function waitForApproval(command, requestId, approvalId) {
       fail("Approval status was not recognized.");
       return;
     }
-    const retried = await request("/api/runtime/actions", {
-      requestId,
-      action: command.action,
-      resourceId: command.resourceId,
-      approvalId,
-    });
+    const retried = await request("/api/runtime/actions", actionBody(command, requestId, approvalId));
     if (retried.status !== 200 || retried.payload.status !== "success") {
       fail(failureFor(retried.payload, "The approved protected action failed."));
       return;
@@ -152,11 +220,7 @@ async function main() {
   const requestId = randomUUID();
   let response;
   try {
-    response = await request("/api/runtime/actions", {
-      requestId,
-      action: command.action,
-      resourceId: command.resourceId,
-    });
+    response = await request("/api/runtime/actions", actionBody(command, requestId));
   } catch {
     fail("AgentGate is unavailable.");
     return;
