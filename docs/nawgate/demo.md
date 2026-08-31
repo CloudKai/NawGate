@@ -1,141 +1,416 @@
-# NawGate three-minute demo
+# NawGate complete demo script
 
-Start the local POC with Node.js 22+, a running Docker/Colima/Podman engine,
-and either Ark or OpenAI-compatible configuration:
+This guide contains the exact startup commands, Playground prompts, UI actions,
+expected results, and suggested narration for demonstrating NawGate. Use the
+three-minute core path for judges, then continue into the extended checks if
+time permits.
+
+## 1. Start the local POC
+
+NawGate's protected-action demo requires Node.js 22 or newer and a running
+Docker, Colima, or Podman engine. The model provider may be Ark or an
+OpenAI-compatible provider.
+
+### macOS with Homebrew
+
+Install Node.js 22 once if it is not already installed:
 
 ```bash
-nvm use 22
-set -a; source .env; set +a
+brew install node@22
+```
+
+From the repository root, run:
+
+```bash
+export PATH="$(brew --prefix node@22)/bin:$PATH"
+rehash
+node --version
+
+set -a
+source .env
+set +a
+
+unset APP_DATA_DIR
+unset AGENT_WORKSPACE_ROOT
+unset CODEX_HOME
+unset CODEX_BIN
+unset NAWGATE_GATEWAY_URL
+
 npm run poc
 ```
 
-Open `http://localhost:3000` and use the side panel:
+Do not add trailing `\` characters between these commands. A trailing `\`
+joins the next line into the same shell command.
 
-1. As User A, create or select an Agent and run a normal prompt.
-2. Run a protected read for `project-a`: the audit timeline should show
-   `ALLOW` and `SUCCESS`.
-3. Run a protected read for `project-b`: it should show `DENY`, owner mismatch,
-   and no protected execution.
-4. Run a production deploy: confirm the side-panel approval card appears with
-   `1 / 1` owner approval and no deployment occurs before approval.
-5. Switch to User B and confirm the Agent and approval are not visible.
-6. Switch back to User A, approve once, and confirm `CAPABILITY ISSUED`,
-   `CAPABILITY CONSUMED`, and one successful protected action. The claim is
-   payload-bound and durable, but the payload itself is never shown or stored.
-7. Use **Revoke access** during an active Run when demonstrating the kill path;
-   subsequent gateway requests receive an invalid runtime credential response.
-8. In the **Security Lab**, run **Own project**, **Cross-user deny**, and
-   **Forged admin**. Each result should show the real decision, `bouncer-v5`,
-   `RuntimeGateway`, and whether a protected side effect executed.
-9. For the complete JIT proof, select **Alpha restricted JIT**, approve the
-   resulting card, then select **Complete approved JIT** in the Lab result.
-   The exact read succeeds once, the persistent grant remains viewer, and the
-   synthetic Run is closed without exposing its credential.
-10. Select **Queued after revoke**. It shows an actual initial allow paused
-    before the side effect, owner-style authority revocation, and the final
-    RuntimeGateway recheck deny with zero execution.
-11. The Audit timeline displays `Verified` after these events. If the
-    persisted `launchpad.json` is edited while the server is running, refresh
-    the Agent: the UI reports `Integrity broken`, preserves the evidence for
-    inspection, and protected actions are disabled until the damaged store is
-    restored from a trusted copy.
-
-The receipt is evidence only: it contains metadata and status, never secrets.
-
-## Managing demo team membership
-
-The actor card in the left sidebar shows the selected human's current teams.
-When acting as a team administrator, use **Add a user** to choose a demo user,
-team, and role. For example, User A can add User C to Team Alpha. Switch to
-User C afterward to verify that Team Alpha appears in that user's membership
-list. User B is the Team Beta administrator and can manage Beta memberships in
-the same way. Each managed member also has a **Remove** action; the final team
-administrator cannot be removed. Non-admin actors can view their memberships
-but cannot add or remove members.
-
-For the Phase 5 critical path, use User A's `asset-user-a-video-2` publish
-request to `tiktok-account:brand-sg`. The approval card shows `critical` and
-`1 / 2` with owner plus independent reviewer roles. User A approves once;
-switch to the independent Org A reviewer, User C, and approve the second slot.
-Only then does the gateway issue and consume one exact capability. User B is
-not eligible for the Org A reviewer slot, and no runtime payload can change the
-risk tier or approver identity.
-
-## Persistent Team Agent extension
-
-Keep the core Bouncer story above within three minutes. If a judge asks about
-production team permissions, select a User A Agent and use the **Persistent
-Team Agent enrollment** card:
-
-1. Enroll the Agent in Team Alpha as `viewer`.
-2. Run the internal and restricted reads below. The internal read succeeds;
-   the restricted read creates a JIT approval because the viewer grant is
-   under-role even though User A is a team admin.
-3. Approve the restricted request once in the side panel. The exact
-   human/Agent/Run/team/file/grant bundle is consumed once, the file read
-   succeeds, and the persistent Agent grant remains viewer.
-4. Revoke the enrollment and retry the internal read. It fails closed with
-   `agent_grant_revoked` and no protected read executes.
-5. Re-enroll as `editor`. The new bundle version can read both Alpha files and
-   the audit timeline identifies the exact grant and effective scope.
+### Linux or macOS with nvm
 
 ```bash
-agentctl file read team-alpha-internal
-agentctl file read team-alpha-restricted
-agentctl file read team-beta-internal
+nvm use 22
+
+set -a
+source .env
+set +a
+
+unset APP_DATA_DIR
+unset AGENT_WORKSPACE_ROOT
+unset CODEX_HOME
+unset CODEX_BIN
+unset NAWGATE_GATEWAY_URL
+
+npm run poc
 ```
 
-- User A is not a Team Beta member, so the Beta file remains denied regardless
-  of the Alpha Agent grant.
-- User B's Team Alpha human membership alone is insufficient: User B is not an
-  Alpha admin and cannot self-enroll an Agent in this demo.
-- The persistent grant survives Run completion, while every new Run still
-  requires its own short-lived runtime identity.
+Keep this terminal running throughout the browser demonstration. The first run
+may take longer because it installs dependencies and builds the Runtime image.
 
-The audit timeline should retain the registered file identifier and policy
-reason while never containing the synthetic file payload.
-
-## Synthetic content rehearsal
-
-The same RuntimeGateway also accepts deterministic content commands from the
-Runtime `agentctl`:
+If port 3000 may already be running, check it first:
 
 ```bash
-agentctl content moderate asset-user-a-video-1
-agentctl content disclose asset-user-a-video-1
-agentctl content publish asset-user-a-video-1
-agentctl content export asset-user-a-video-1
+curl http://localhost:3000/api/health
+lsof -nP -iTCP:3000 -sTCP:LISTEN
 ```
 
-Moderation returns only an aggregate result. Disclosure is limited to the
-backend-approved analytics scope for User A's exact asset. Publish and export
-show the normal owner approval card and consume one exact capability. The
-organisation, business centre, account, asset, purpose, content version, and
-registered synthetic destination are fixed by the server-side demo model. The
-destination IDs are `tiktok-account:brand-sg`,
-`tiktok-account:creator-demo`, `analytics:approved-dashboard`, and
-`archive:compliance-store`; the command accepts an ID reference, never a URL
-or credential. The local adapter records a safe receipt with route metadata
-and a credential reference, while keeping synthetic credentials and protected
-content server-side. No external TikTok request or network-isolation claim is
-involved.
+If the health endpoint succeeds, use the existing instance. Otherwise, stop
+only the stale PID reported by `lsof`, then start the POC again:
 
-The **Replay capability** Security Lab scenario runs the first approved JIT
-read, then attempts a fresh-request replay with the consumed capability. It
-should show `DENY`, `capability_consumed`, and no second side effect. The
-**Revoke grant** and **Revoke Run** scenarios intentionally mutate demo
-authority so their follow-up requests fail closed.
+```bash
+kill <PID>
+```
 
-## Manual real-Codex rehearsal
+Open `http://localhost:3000`. Enter the same `APP_AUTH_TOKEN` configured in
+`.env`; do not display the token during the presentation.
 
-The browser workflow above uses the configured model. Keep the deterministic
-`phase7.e2e.test.ts` in automated validation. For a manual real-container
-check, run the optional gated smoke test after `npm run poc` has built
-`volc-agent-runtime:local`:
+## 2. Create the demo Agent
+
+Select **Create Agent** and enter:
+
+- Name: `NawGate Demo Agent`
+- Description: `Demonstrates backend-enforced delegated access`
+- Instructions:
+
+```text
+Execute commands I explicitly request. Never simulate command output. Explain the result briefly without exposing credentials or protected payloads.
+```
+
+Suggested narration:
+
+> This Agent has its own persistent workspace, but it does not decide its own
+> permissions. NawGate derives the Human, Agent, and Run identities on the
+> backend.
+
+## 3. Playground and multi-turn continuity
+
+Send this first message:
+
+```text
+Create demo.txt containing "NawGate multi-turn demo", then read it back and tell me what you created.
+```
+
+After it completes, send this second message to the same Agent:
+
+```text
+Continue the previous task. Append "second turn confirmed" to demo.txt, then show me the final contents.
+```
+
+Expected result:
+
+- both Runs complete;
+- the same Agent workspace is reused;
+- the second message resumes the same conversation;
+- `demo.txt` contains both lines.
+
+Suggested narration:
+
+> This confirms that normal Agent CRUD, workspace persistence, real model
+> execution, and multi-turn conversation still work alongside NawGate.
+
+Before filling the audit timeline with Security Lab events, select **Replay**
+on this completed Playground Run. The Flight Data Recorder should show the
+sanitized prompt and output, duration, status, and token metadata.
+
+## 4. Three-minute core NawGate path
+
+The `agentctl` commands below must be requested from the Agent in the browser
+Playground. Do not run them in the host macOS or Linux terminal. The official
+container Runtime installs `agentctl` and injects a short-lived Run credential.
+
+### 4.1 Owner resource allow
+
+Send:
+
+```text
+Run exactly this terminal command and return its output: agentctl resource read project-a
+```
+
+Expected result:
+
+- the Agent reports `ALLOW`;
+- the audit timeline shows `ALLOW` followed by `SUCCESS`;
+- the enforcement point is `RuntimeGateway`;
+- `side effect executed` is shown.
+
+Suggested narration:
+
+> User A owns this resource. The model requested access, but the trusted
+> RuntimeGateway made and enforced the decision.
+
+### 4.2 Cross-user hard denial
+
+Send:
+
+```text
+Run exactly this terminal command and return its output: agentctl resource read project-b
+```
+
+Expected result:
+
+- the command reports that the protected action was not permitted;
+- the audit timeline shows `DENY` and an owner-mismatch reason;
+- no protected side effect executes;
+- User B's protected payload is never displayed.
+
+Suggested narration:
+
+> Approval cannot repair a hard cross-user denial. NawGate fails closed before
+> revealing protected information.
+
+### 4.3 Production approval and one-use authority
+
+Send:
+
+```text
+Run exactly this terminal command: agentctl deploy production
+```
+
+The Run should report:
+
+```text
+Waiting for owner approval...
+```
+
+In **Needs your approval**, verify the high-risk request and `0 / 1` approval
+progress. Do not approve immediately.
+
+Suggested narration:
+
+> The deployment has not executed. The Agent cannot approve itself, and no
+> capability has been issued yet.
+
+To demonstrate isolation, switch to **User B** and confirm that User A's Agent
+and approval are not visible. Switch back to **User A**, select the Agent, and
+approve the request before the approval wait expires.
+
+Expected Agent output:
+
+```text
+NawGate: owner approved once -> ALLOW
+Deployment completed.
+```
+
+Expected audit evidence includes:
+
+- `APPROVAL REQUIRED`;
+- `APPROVED`;
+- `CAPABILITY ISSUED`;
+- `CAPABILITY CONSUMED`;
+- `SUCCESS`.
+
+Suggested narration:
+
+> Approval created an exact, short-lived, one-use capability bound to this
+> Human, Agent, Run, action, resource, and request.
+
+## 5. Team membership and persistent Agent enrollment
+
+As **User A**, use the team controls in the sidebar:
+
+1. Add **User C** to **Team Alpha** as Viewer.
+2. Switch to User C and confirm Team Alpha appears in the membership card.
+3. Confirm User A's Agent remains hidden.
+4. Switch back to User A and select the Agent.
+
+Suggested narration:
+
+> Team membership does not transfer Agent ownership. Human membership,
+> persistent Agent enrollment, and temporary Run authority remain separate.
+
+In **Persistent Team Agent enrollment**, enroll the Agent in Team Alpha as
+`viewer`.
+
+Send:
+
+```text
+Run exactly this terminal command: agentctl file read team-alpha-internal
+```
+
+Expected: `ALLOW` with the active viewer grant.
+
+Then send:
+
+```text
+Run exactly this terminal command: agentctl file read team-beta-internal
+```
+
+Expected: `DENY`, because User A has no trusted Team Beta membership. A Team
+Alpha Agent grant cannot authorize a Team Beta resource.
+
+## 6. Complete Security Lab sequence
+
+The Security Lab exercises the real backend `RuntimeGateway`. It does not
+implement a second policy engine. Its synthetic credentials and protected
+payloads stay server-side, and terminal paths revoke their synthetic Run
+authority.
+
+Run the scenarios in this order. Completed result cards dismiss after roughly
+12 seconds, but their audit evidence remains.
+
+| Button | Expected result |
+| --- | --- |
+| **Own project** | `ALLOW`; protected side effect executes. |
+| **Cross-user deny** | `DENY`; owner mismatch; no side effect. |
+| **Alpha internal** | `ALLOW` with the persistent viewer grant. |
+| **Alpha restricted JIT** | `REQUIRE_APPROVAL`; no side effect before approval. |
+| **Beta cross-team** | `DENY`; missing trusted Team Beta relationship. |
+| **Forged admin** | `DENY`; injected role and team attributes are ignored. |
+| **Replay capability** | First use succeeds; fresh-request replay is denied as `capability_consumed`. |
+| **Revoke Run** | Follow-up request is denied because Run authority was revoked. |
+| **Queued after revoke** | Initial allow is paused; final recheck denies after revocation; no side effect. |
+| **Revoke grant** | Persistent enrollment is revoked and follow-up access fails closed. |
+
+Run **Revoke grant** last because it intentionally changes the Agent's durable
+Team Alpha enrollment.
+
+### Complete the restricted-file JIT flow
+
+1. Select **Alpha restricted JIT**.
+2. Confirm the result is `REQUIRE_APPROVAL`.
+3. Approve the resulting request in **Needs your approval**.
+4. Select **Complete approved JIT** in the Security Lab result.
+
+Expected result:
+
+- the exact restricted read succeeds once;
+- the capability is consumed;
+- the Agent's persistent role remains Viewer;
+- the synthetic Run authority is closed;
+- no credential or file payload appears in the UI.
+
+Suggested narration:
+
+> JIT authority elevates only this exact request. It does not mutate the
+> Agent's persistent Viewer role.
+
+### Final pre-side-effect recheck
+
+Select **Queued after revoke**.
+
+Suggested narration:
+
+> NawGate initially allowed the action, paused before execution, revoked the
+> authority, and checked again immediately before the side effect. The final
+> check denied the action, so nothing executed.
+
+## 7. Audit evidence, integrity, receipt, and replay
+
+Show the judge:
+
+- Audit status: `Verified`;
+- policy version: `bouncer-v5`;
+- enforcement point: `RuntimeGateway` or the identified trusted service;
+- whether a protected side effect executed;
+- safe reason codes and explanations;
+- approval and capability lifecycle;
+- the Delegation Receipt.
+
+Suggested narration:
+
+> The audit chain is tamper-evident and redacted. It records trusted decisions
+> and authority bindings, but never Runtime credentials or protected payloads.
+
+Security Lab Runs intentionally retain audit evidence without creating
+Playground flight recordings. Selecting Replay on one of those synthetic Runs
+should show:
+
+```text
+Replay unavailable
+No flight recording exists for this Run. Security Lab demo Runs keep audit evidence but do not create Playground flight recordings.
+```
+
+Use a completed real Playground Run when demonstrating the Flight Data
+Recorder itself.
+
+## 8. Optional content-governance commands
+
+These commands use synthetic registered content assets and destinations. They
+do not call a real TikTok API or contain production data.
+
+Ask the Agent to run each command exactly:
+
+```text
+Run exactly this terminal command: agentctl content moderate asset-user-a-video-1
+```
+
+```text
+Run exactly this terminal command: agentctl content disclose asset-user-a-video-1
+```
+
+```text
+Run exactly this terminal command: agentctl content publish asset-user-a-video-1
+```
+
+```text
+Run exactly this terminal command: agentctl content export asset-user-a-video-1
+```
+
+Moderation returns an aggregate result. Disclosure is limited to the
+backend-approved analytics scope. Publish and export use registered synthetic
+destinations and require approval. Safe destination receipts are persisted,
+while credentials and protected content remain backend-owned.
+
+### Current dual-control UI limitation
+
+The backend implements critical two-person approval for User A's
+`asset-user-a-video-2` publish request, requiring the owner and an independent
+Org A reviewer. The current browser UI does not yet provide User C with a
+separate reviewer approval inbox because User C cannot open User A's Agent.
+Demonstrate this behavior through the focused backend test below; do not claim
+that the independent-reviewer step is currently a complete manual UI flow.
+
+## 9. Stop and verify the complete implementation
+
+Press `Ctrl+C` in the POC terminal. The startup script removes its temporary
+Runtime containers while preserving Agent workspaces and conversations.
+
+Run the complete repository gate from the repository root:
+
+```bash
+npm run check
+```
+
+The current expected result is 26 passing test files, 163 passing tests, one
+environment-gated skipped test, and successful Web and server builds.
+
+Run the real container smoke test:
 
 ```bash
 CONTAINER_ENGINE=docker npm run test:container
 ```
 
-Use `CONTAINER_ENGINE=podman` for Podman. The smoke test validates the actual
-installed `agentctl` path and does not print the runtime credential.
+Use `CONTAINER_ENGINE=podman` when testing with Podman. The smoke test must
+actually use a running container engine before it may be reported as passing.
+
+Run the focused critical dual-control verification:
+
+```bash
+npm test -w @launchpad/server -- --run src/nawgate/phase5-dual-control.test.ts
+```
+
+## 10. Scope statement for judges
+
+End with this accurate limitation:
+
+> NawGate protects registered protected actions routed through its trusted
+> gateway. It does not claim to intercept every internal Codex shell command or
+> file operation. The authorization decision, capability lifecycle, protected
+> side effect, and redacted audit evidence for registered actions are enforced
+> by the backend rather than by the model or UI.
