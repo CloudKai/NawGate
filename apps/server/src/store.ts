@@ -69,6 +69,7 @@ const emptyDatabase = (): Database => seedDatabase({
   registeredDestinations: [],
   destinationReceipts: [],
   approvalAuthorities: [],
+  teamRuns: [],
 });
 
 type DatabaseSeed = Omit<Database, "version" | "auditChain"> & {
@@ -84,6 +85,7 @@ function seedDatabase(database: DatabaseSeed, seedDestinations = true): Database
   const sourceVersion = database.version;
   const seeded = database as Database & { auditChain?: Database["auditChain"] };
   seeded.version = 8;
+  seeded.teamRuns = seeded.teamRuns ?? [];
   if (sourceVersion !== 8 || !seeded.auditChain) {
     seeded.auditChain = {
       ...emptyAuditChainState(),
@@ -252,6 +254,8 @@ function migrateAuditEvents(value: unknown[]): Database["auditEvents"] {
           : null,
       agentId: typeof record.agentId === "string" ? record.agentId : null,
       runId: typeof record.runId === "string" ? record.runId : null,
+      teamRunId: typeof record.teamRunId === "string" ? record.teamRunId : null,
+      taskId: typeof record.taskId === "string" ? record.taskId : null,
       requestId: typeof record.requestId === "string" ? record.requestId : null,
       action:
         typeof record.action === "string"
@@ -1023,6 +1027,9 @@ export function migrateDatabase(value: unknown): Database {
       destinationReceipts: structuredClone(value.destinationReceipts) as Database["destinationReceipts"],
       approvalAuthorities: structuredClone(value.approvalAuthorities) as Database["approvalAuthorities"],
       auditChain: structuredClone(value.auditChain) as Database["auditChain"],
+      teamRuns: Array.isArray(value.teamRuns)
+        ? structuredClone(value.teamRuns) as Database["teamRuns"]
+        : [],
     };
     return invalidateStaleDestinationClaims(migrated);
   }
@@ -1050,6 +1057,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1085,6 +1093,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1123,6 +1132,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1166,6 +1176,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1238,6 +1249,9 @@ export function migrateDatabase(value: unknown): Database {
       : [],
     approvalAuthorities: value.version === 7
       ? value.approvalAuthorities as Database["approvalAuthorities"]
+      : [],
+    teamRuns: Array.isArray(value.teamRuns)
+      ? value.teamRuns as Database["teamRuns"]
       : [],
   }, value.version === 5);
 }
@@ -1368,11 +1382,20 @@ export class JsonStore {
   }
 
   private async persist(data: Database = this.data): Promise<void> {
+    const content = JSON.stringify(data, null, 2) + "\n";
     const temporaryPath = this.filePath + ".tmp";
-    await writeFile(temporaryPath, JSON.stringify(data, null, 2) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(temporaryPath, this.filePath);
+    try {
+      await writeFile(temporaryPath, content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(temporaryPath, this.filePath);
+    } catch {
+      // Fallback for container volume mounts or file systems where rename has EACCES/EPERM/EBUSY
+      await writeFile(this.filePath, content, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+    }
   }
 }

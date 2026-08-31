@@ -52,7 +52,7 @@ const gateway = new RuntimeGateway(
 const securityLab = new SecurityLabService(gateway, approvals, audit, credentials, grants);
 const runner = createRunner(config, store, { credentials, audit, approvals });
 const identity = new IdentityService();
-const service = new AgentService(config, store, workspaces, runner, approvals);
+const service = new AgentService(config, store, workspaces, runner, approvals, audit);
 await service.initialize();
 
 const app = await createApp(config, service, identity, {

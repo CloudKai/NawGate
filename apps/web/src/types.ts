@@ -36,6 +36,59 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  authorName?: string;
+  teamId?: string | null;
+}
+
+export type TaskNodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface TaskNode {
+  id: string;
+  assignedAgentId: string;
+  title: string;
+  description: string;
+  dependsOn: string[];
+  status: TaskNodeStatus;
+  output?: string;
+  error?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  durationMs?: number | null;
+}
+
+export interface TaskGraph {
+  tasks: TaskNode[];
+}
+
+export type TeamRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface TeamArtifact {
+  id: string;
+  agentId: string;
+  taskId: string;
+  type: "contract" | "file" | "data" | "schema";
+  name: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface TeamBlackboard {
+  state: Record<string, unknown>;
+  artifacts: TeamArtifact[];
+  createdFiles: string[];
+}
+
+export interface TeamRun {
+  id: string;
+  teamId: string;
+  ownerUserId: HumanId;
+  prompt: string;
+  status: TeamRunStatus;
+  graph: TaskGraph;
+  blackboard: TeamBlackboard;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
 }
 
 export interface AgentRun {

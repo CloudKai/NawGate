@@ -14,6 +14,7 @@ import type {
   TeamId,
   TeamMembership,
   TeamRole,
+  TeamRun,
 } from "./types";
 
 export class ApiError extends Error {
@@ -181,7 +182,7 @@ export const api = {
   runs: (id: string) =>
     request<{ runs: AgentRun[] }>("/api/agents/" + id + "/runs"),
   sendMessage: (id: string, content: string) =>
-    request<{ run: AgentRun; message: Message }>(
+    request<{ run: AgentRun; message: Message; teamRun?: TeamRun }>(
       "/api/agents/" + id + "/messages",
       {
         method: "POST",
@@ -189,6 +190,9 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  latestTeamRun: (agentId: string) =>
+    request<{ teamRun: TeamRun | null }>("/api/agents/" + agentId + "/team-runs/latest"),
+  teamRun: (id: string) => request<{ teamRun: TeamRun }>("/api/team-runs/" + id),
   getReplay: (agentId: string, runId: string) =>
     request<{ replay: ReplayPayload }>("/api/agents/" + agentId + "/replays/" + runId),
 };

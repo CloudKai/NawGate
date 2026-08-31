@@ -19,6 +19,8 @@ const HASHED_EVENT_FIELDS = [
   "humanId",
   "agentId",
   "runId",
+  "teamRunId",
+  "taskId",
   "requestId",
   "action",
   "resourceId",

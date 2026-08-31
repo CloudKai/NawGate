@@ -4,6 +4,9 @@ import type { AppConfig } from "./config.js";
 import { isModelConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
 import type { ApprovalService } from "./nawgate/approval-service.js";
+import { AuditService } from "./nawgate/audit-service.js";
+import { TeamOrchestrator, type TeamAgentContext } from "./nawgate/team-orchestrator.js";
+import { TeamDAGRunner } from "./nawgate/team-dag-runner.js";
 import type { HumanPrincipal } from "./nawgate/types.js";
 import { JsonStore } from "./store.js";
 import type {
@@ -12,6 +15,7 @@ import type {
   AgentRunner,
   CreateAgentInput,
   Message,
+  TeamRun,
   UpdateAgentInput,
 } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -21,6 +25,8 @@ const now = () => new Date().toISOString();
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
+  private readonly orchestrator: TeamOrchestrator;
+  private readonly dagRunner: TeamDAGRunner;
 
   constructor(
     private readonly config: AppConfig,
@@ -28,7 +34,16 @@ export class AgentService {
     private readonly workspaces: WorkspaceManager,
     private readonly runner: AgentRunner,
     private readonly approvals?: ApprovalService,
-  ) {}
+    private readonly audit?: AuditService,
+  ) {
+    this.orchestrator = new TeamOrchestrator(this.config);
+    this.dagRunner = new TeamDAGRunner(
+      this.config,
+      this.store,
+      this.runner,
+      this.audit ?? new AuditService(this.store),
+    );
+  }
 
   async initialize(): Promise<void> {
     await this.store.initialize();
@@ -169,9 +184,27 @@ export class AgentService {
 
   getMessages(agentId: string, actor: HumanPrincipal): Message[] {
     this.getAgent(agentId, actor);
-    return this.store
-      .snapshot()
-      .messages.filter((message) => message.agentId === agentId)
+    const db = this.store.snapshot();
+    const activeGrant = db.agentTeamGrants.find(
+      (g) => g.agentId === agentId && g.status === "active",
+    );
+    if (activeGrant) {
+      const teamGrants = db.agentTeamGrants.filter(
+        (g) => g.teamId === activeGrant.teamId && g.status === "active",
+      );
+      if (teamGrants.length > 1) {
+        const teamAgentIds = new Set(teamGrants.map((g) => g.agentId));
+        return db.messages
+          .filter(
+            (message) =>
+              message.teamId === activeGrant.teamId ||
+              teamAgentIds.has(message.agentId),
+          )
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      }
+    }
+    return db.messages
+      .filter((message) => message.agentId === agentId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -207,11 +240,36 @@ export class AgentService {
     );
   }
 
+  getTeamRun(teamRunId: string, actor: HumanPrincipal): TeamRun {
+    const teamRun = this.store.snapshot().teamRuns?.find((r) => r.id === teamRunId);
+    if (!teamRun || teamRun.ownerUserId !== actor.id) {
+      throw new HttpError(404, "Team run not found");
+    }
+    return teamRun;
+  }
+
+  getLatestTeamRun(agentOrTeamId: string, actor: HumanPrincipal): TeamRun | null {
+    const snapshot = this.store.snapshot();
+    const runs = (snapshot.teamRuns || []).filter(
+      (r) =>
+        r.ownerUserId === actor.id &&
+        (r.teamId === agentOrTeamId || r.graph.tasks.some((t) => t.assignedAgentId === agentOrTeamId)),
+    );
+    return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+  }
+
+  listTeamRuns(teamId: string, actor: HumanPrincipal): TeamRun[] {
+    const snapshot = this.store.snapshot();
+    return (snapshot.teamRuns || [])
+      .filter((r) => r.ownerUserId === actor.id && r.teamId === teamId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   async sendMessage(
     agentId: string,
     prompt: string,
     actor: HumanPrincipal,
-  ): Promise<{ run: AgentRun; message: Message }> {
+  ): Promise<{ run: AgentRun; message: Message; teamRun?: TeamRun }> {
     this.getAgent(agentId, actor);
     if (!isModelConfigured(this.config)) {
       throw new HttpError(
@@ -221,6 +279,22 @@ export class AgentService {
     }
     const sanitizedPrompt = maskSensitiveData(prompt);
     const timestamp = now();
+
+    // Check if the agent is enrolled in a team with other active members
+    const dbSnapshot = this.store.snapshot();
+    const activeGrant = dbSnapshot.agentTeamGrants.find(
+      (g) => g.agentId === agentId && g.status === "active",
+    );
+    const activeTeamGrants = activeGrant
+      ? dbSnapshot.agentTeamGrants.filter(
+          (g) => g.teamId === activeGrant.teamId && g.status === "active",
+        )
+      : [];
+
+    if (activeGrant && activeTeamGrants.length > 1) {
+      return this.sendTeamMessage(activeGrant.teamId, activeTeamGrants, agentId, sanitizedPrompt, actor);
+    }
+
     const runId = randomUUID();
     const run: AgentRun = {
       id: runId,
@@ -271,6 +345,119 @@ export class AgentService {
       })
       .catch(() => undefined);
     return { run, message };
+  }
+
+  private async sendTeamMessage(
+    teamId: string,
+    activeGrants: import("./nawgate/types.js").AgentTeamGrant[],
+    triggerAgentId: string,
+    sanitizedPrompt: string,
+    actor: HumanPrincipal,
+  ): Promise<{ run: AgentRun; message: Message; teamRun: TeamRun }> {
+    const timestamp = now();
+    const teamRunId = randomUUID();
+    const dbSnapshot = this.store.snapshot();
+
+    const teamContexts: TeamAgentContext[] = activeGrants.map((grant) => {
+      const agent = dbSnapshot.agents.find((a) => a.id === grant.agentId)!;
+      return { agent, grant };
+    });
+
+    // Plan DAG using TeamOrchestrator
+    const graph = await this.orchestrator.planTaskGraph({
+      prompt: sanitizedPrompt,
+      teamId,
+      agents: teamContexts,
+    });
+
+    const teamRun: TeamRun = {
+      id: teamRunId,
+      teamId,
+      ownerUserId: actor.id,
+      prompt: sanitizedPrompt,
+      status: "queued",
+      graph,
+      blackboard: {
+        state: {},
+        artifacts: [],
+        createdFiles: [],
+      },
+      startedAt: null,
+      completedAt: null,
+      createdAt: timestamp,
+    };
+
+    const run: AgentRun = {
+      id: teamRunId,
+      agentId: triggerAgentId,
+      status: "queued",
+      prompt: sanitizedPrompt,
+      output: null,
+      error: null,
+      usage: null,
+      startedAt: null,
+      completedAt: null,
+      createdAt: timestamp,
+    };
+
+    const message: Message = {
+      id: randomUUID(),
+      agentId: triggerAgentId,
+      runId: teamRunId,
+      role: "user",
+      content: sanitizedPrompt,
+      createdAt: timestamp,
+      teamId,
+    };
+
+    await this.store.mutate((database) => {
+      database.teamRuns = database.teamRuns ?? [];
+      database.teamRuns.push(teamRun);
+      database.runs.push(run);
+      database.messages.push(message);
+
+      for (const ctx of teamContexts) {
+        const ag = database.agents.find((a) => a.id === ctx.agent.id);
+        if (ag && ag.status !== "stopped") {
+          ag.status = "busy";
+          ag.updatedAt = timestamp;
+        }
+      }
+    });
+
+    const teamExecution = this.dagRunner.executeTeamRun(teamRunId, actor).finally(async () => {
+      const finalTeamRun = this.store.snapshot().teamRuns?.find((r) => r.id === teamRunId);
+      const isComplete = finalTeamRun?.status === "completed";
+      const finalOutput = finalTeamRun?.graph.tasks
+        .filter((t) => t.output)
+        .map((t) => `**${t.title}**\n${t.output}`)
+        .join("\n\n") || (isComplete ? "Team tasks completed." : "Team run encountered an issue.");
+
+      await this.store.mutate((database) => {
+        const storedRun = database.runs.find((r) => r.id === teamRunId);
+        if (storedRun) {
+          storedRun.status = isComplete ? "completed" : "failed";
+          storedRun.output = finalOutput;
+          storedRun.completedAt = now();
+        }
+        for (const ctx of teamContexts) {
+          const ag = database.agents.find((a) => a.id === ctx.agent.id);
+          if (ag && ag.status === "busy") {
+            ag.status = isComplete ? "ready" : "error";
+            ag.updatedAt = now();
+          }
+        }
+      });
+      for (const ctx of teamContexts) {
+        this.activeExecutions.delete(ctx.agent.id);
+      }
+    });
+
+    for (const ctx of teamContexts) {
+      this.activeExecutions.set(ctx.agent.id, teamExecution.then(() => undefined));
+    }
+
+    return { run, message, teamRun };
   }
 
   async systemInfo(): Promise<Record<string, unknown>> {
