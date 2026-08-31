@@ -64,6 +64,7 @@ const emptyDatabase = (): Database => seedDatabase({
   registeredDestinations: [],
   destinationReceipts: [],
   approvalAuthorities: [],
+  teamRuns: [],
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,6 +72,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function seedDatabase(database: Database, seedDestinations = true): Database {
+  database.teamRuns = database.teamRuns ?? [];
   for (const resource of DEMO_PROTECTED_RESOURCES) {
     if (!database.protectedResources.some((item) => item.id === resource.id)) {
       database.protectedResources.push(structuredClone(resource));
@@ -939,6 +941,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -974,6 +977,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1012,6 +1016,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1055,6 +1060,7 @@ export function migrateDatabase(value: unknown): Database {
       registeredDestinations: [],
       destinationReceipts: [],
       approvalAuthorities: [],
+      teamRuns: [],
     });
   }
 
@@ -1127,6 +1133,9 @@ export function migrateDatabase(value: unknown): Database {
       : [],
     approvalAuthorities: value.version === 7
       ? value.approvalAuthorities as Database["approvalAuthorities"]
+      : [],
+    teamRuns: Array.isArray(value.teamRuns)
+      ? value.teamRuns as Database["teamRuns"]
       : [],
   }, value.version === 5);
 }

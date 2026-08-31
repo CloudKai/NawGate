@@ -10,7 +10,22 @@ import type {
   TeamMembership,
   RegisteredDestination,
   DestinationSideEffectReceipt,
+  TaskNode,
+  TaskGraph,
+  TeamRun,
+  TeamBlackboard,
+  TeamArtifact,
+  TeamRunStatus,
 } from "./nawgate/types.js";
+
+export type {
+  TaskNode,
+  TaskGraph,
+  TeamRun,
+  TeamBlackboard,
+  TeamArtifact,
+  TeamRunStatus,
+};
 
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -37,6 +52,7 @@ export interface Message {
   role: MessageRole;
   content: string;
   createdAt: string;
+  authorName?: string;
 }
 
 export interface RunUsage {
@@ -74,6 +90,7 @@ export interface Database {
   registeredDestinations: RegisteredDestination[];
   destinationReceipts: DestinationSideEffectReceipt[];
   approvalAuthorities: ApprovalAuthority[];
+  teamRuns: TeamRun[];
 }
 
 export interface CreateAgentInput {

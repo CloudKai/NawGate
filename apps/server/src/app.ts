@@ -560,6 +560,21 @@ export async function createApp(
     return { run: service.getRun(id, humanActor(request)) };
   });
 
+  app.get("/api/agents/:id/team-runs/latest", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { teamRun: service.getLatestTeamRun(id, humanActor(request)) };
+  });
+
+  app.get("/api/teams/:teamId/runs/latest", async (request) => {
+    const { teamId } = z.object({ teamId: z.string().min(1) }).parse(request.params);
+    return { teamRun: service.getLatestTeamRun(teamId, humanActor(request)) };
+  });
+
+  app.get("/api/team-runs/:id", async (request) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    return { teamRun: service.getTeamRun(id, humanActor(request)) };
+  });
+
   if (config.nodeEnv === "production") {
     const webRoot = fileURLToPath(new URL("../../web/dist", import.meta.url));
     await app.register(fastifyStatic, {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
 import { NawGatePanel } from "./components/nawgate/NawGatePanel";
 import { DemoActorSwitch } from "./components/nawgate/DemoActorSwitch";
+import { TeamGraphVisualizer } from "./components/nawgate/TeamGraphVisualizer";
 import type {
   Agent,
   AgentTeamGrant,
@@ -12,6 +13,7 @@ import type {
   HumanPrincipal,
   Message,
   SystemInfo,
+  TeamRun,
 } from "./types";
 
 const starterPrompts = [
@@ -57,6 +59,7 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [activeTeamRun, setActiveTeamRun] = useState<TeamRun | null>(null);
   const [actor, setActor] = useState<HumanPrincipal | null>(null);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
@@ -99,17 +102,21 @@ export default function App() {
   }, []);
 
   const refreshGate = useCallback(async (agentId: string) => {
-    const [pendingResult, allApprovalResult, auditResult, grantResult] = await Promise.all([
+    const [pendingResult, allApprovalResult, auditResult, grantResult, teamRunResult] = await Promise.all([
       api.approvals(agentId, "pending"),
       api.approvals(agentId),
       api.audit(agentId),
       api.teamGrants(agentId),
+      api.latestTeamRun(agentId).catch(() => ({ teamRun: null })),
     ]);
     if (mountedRef.current && selectedIdRef.current === agentId) {
       setApprovals(pendingResult.approvals);
       setApprovalHistory(allApprovalResult.approvals);
       setAudit(auditResult.audit);
       setGrants(grantResult.grants);
+      if (teamRunResult.teamRun) {
+        setActiveTeamRun(teamRunResult.teamRun);
+      }
     }
   }, []);
 
@@ -136,6 +143,7 @@ export default function App() {
 
   useEffect(() => {
     setActiveRun(null);
+    setActiveTeamRun(null);
     setShowSettings(false);
     setApprovals([]);
     setApprovalHistory([]);
@@ -146,11 +154,19 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    void Promise.all([refreshMessages(selectedId), api.runs(selectedId), refreshGate(selectedId)])
-      .then(([, result]) => {
+    void Promise.all([
+      refreshMessages(selectedId),
+      api.runs(selectedId),
+      refreshGate(selectedId),
+      api.latestTeamRun(selectedId).catch(() => ({ teamRun: null })),
+    ])
+      .then(([, result, , teamRunResult]) => {
         if (selectedIdRef.current !== selectedId) return;
         const latest = result.runs[0] ?? null;
         setActiveRun(latest);
+        if (teamRunResult?.teamRun) {
+          setActiveTeamRun(teamRunResult.teamRun);
+        }
         if (latest && ["queued", "running"].includes(latest.status)) {
           void pollRun(latest.id, selectedId).catch((reason) =>
             selectedIdRef.current === selectedId &&
@@ -257,9 +273,17 @@ export default function App() {
       while (mountedRef.current) {
         await new Promise((resolve) => window.setTimeout(resolve, 900));
         if (!mountedRef.current) return;
-        const result = await api.run(runId);
+        const [result, teamRunResult] = await Promise.all([
+          api.run(runId),
+          api.latestTeamRun(agentId).catch(() => ({ teamRun: null })),
+        ]);
         await refreshGate(agentId);
-        if (selectedIdRef.current === agentId) setActiveRun(result.run);
+        if (selectedIdRef.current === agentId) {
+          setActiveRun(result.run);
+          if (teamRunResult?.teamRun) {
+            setActiveTeamRun(teamRunResult.teamRun);
+          }
+        }
         if (!["queued", "running"].includes(result.run.status)) {
           await Promise.all([refreshMessages(agentId), refreshAgents(), refreshGate(agentId)]);
           return;
@@ -359,6 +383,9 @@ export default function App() {
       if (selectedIdRef.current === selected.id) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
+        if (result.teamRun) {
+          setActiveTeamRun(result.teamRun);
+        }
       }
       setAgents((current) =>
         current.map((agent) =>
@@ -619,6 +646,14 @@ export default function App() {
                 </div>
               </div>
 
+              {activeTeamRun && (
+                <TeamGraphVisualizer
+                  teamRun={activeTeamRun}
+                  agents={agents}
+                  onClose={() => setActiveTeamRun(null)}
+                />
+              )}
+
               <div className="messages">
                 {messages.length === 0 && !activeRun ? (
                   <div className="welcome">
@@ -643,7 +678,7 @@ export default function App() {
                   messages.map((message) => (
                     <article className={"message message-" + message.role} key={message.id}>
                       <div className="message-meta">
-                        <strong>{message.role === "user" ? "You" : selected.name}</strong>
+                        <strong>{message.role === "user" ? "You" : (message.authorName || selected.name)}</strong>
                         <span>{formatTime(message.createdAt)}</span>
                       </div>
                       <div className="message-body">{message.content}</div>
@@ -653,14 +688,24 @@ export default function App() {
                 {activeRun && ["queued", "running"].includes(activeRun.status) && (
                   <article className="message message-assistant thinking">
                     <div className="message-meta">
-                      <strong>{selected.name}</strong>
-                      <span>working in the Agent workspace</span>
+                      <strong>
+                        {activeTeamRun && ["queued", "running"].includes(activeTeamRun.status)
+                          ? `Team Collaboration (${activeTeamRun.graph.tasks.filter((t) => t.status === "running").length} agents active)`
+                          : selected.name}
+                      </strong>
+                      <span>
+                        {activeTeamRun && ["queued", "running"].includes(activeTeamRun.status)
+                          ? "executing DAG tasks in workspace"
+                          : "working in the Agent workspace"}
+                      </span>
                     </div>
                     <div className="thinking-row">
                       <Spinner />
                       {approvals.length > 0
                         ? "NawGate is waiting for owner approval…"
-                        : "Codex is reading, editing, or running commands…"}
+                        : activeTeamRun && ["queued", "running"].includes(activeTeamRun.status)
+                          ? "Agents are executing DAG tasks concurrently in the workspace…"
+                          : "Codex is reading, editing, or running commands…"}
                     </div>
                   </article>
                 )}

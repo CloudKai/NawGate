@@ -22,6 +22,8 @@ export interface AuditEventInput {
   humanId: HumanId | null;
   agentId: string | null;
   runId: string | null;
+  teamRunId?: string | null;
+  taskId?: string | null;
   requestId: string | null;
   action: NawGateAction | null;
   resourceId: string | null;
@@ -76,6 +78,8 @@ export class AuditService {
       humanId: input.humanId,
       agentId: input.agentId,
       runId: input.runId,
+      teamRunId: input.teamRunId ?? null,
+      taskId: input.taskId ?? null,
       requestId: input.requestId,
       action: input.action,
       resourceId: safeResourceId,
