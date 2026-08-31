@@ -11,8 +11,8 @@ credentials, personal data, or exploit details in an issue.
 
 ## Known limitations
 
-- Demo User A/User B identities and backend Agent ownership are implemented for
-  the AgentGate proof of concept; this is not production tenant isolation or
+- Demo User A/User B/User C identities and backend Agent ownership are implemented for
+  the NawGate proof of concept; this is not production tenant isolation or
   an enterprise IAM system.
 - Team memberships and roles are deterministic demo fixtures reseeded in the
   local JSON store. Persistent Agent grants have a narrow demo admin surface,
@@ -22,16 +22,33 @@ credentials, personal data, or exploit details in an issue.
   Agent grant, Run authority, and resource threshold. Grant revocation also
   revokes current Run authority, but this is still a single-process POC rather
   than a distributed authorization service.
-- AgentGate protects only registered actions routed through `agentctl`; it does
+- NawGate protects only registered actions routed through `agentctl`; it does
   not intercept every internal Codex shell or file operation.
 - Explicit owner revocation invalidates active Run credentials and pending or
   approved one-use capabilities. It does not promise to terminate an
   arbitrary internal process already running in a container.
+- Risk tiers and approval authorities are deterministic local demo policy. The
+  critical path requires distinct scoped owner and independent-reviewer
+  authorities; this is not a replacement for production identity governance.
 - Runtime credential redaction is exact-token best effort; use the disposable
   container Runtime for protected-action demonstrations.
 - The Security Lab is an explicitly enabled local/demo helper that invokes the
   same RuntimeGateway and returns redacted evidence. It is not enabled by
   default and is not a substitute for production test tooling.
+- New audit records use a redacted, globally sequenced SHA-256 chain. The
+  backend verifies the persisted chain, exposes only a safe integrity report,
+  and disables new audit writes and registered protected actions if the chain
+  is broken. Pre-v8 events are retained as explicitly unverified legacy
+  evidence. This is tamper-evident, not tamper-proof: an actor with unrestricted
+  database write access could rewrite and recompute the complete chain.
+- TikTok-oriented content actions are deterministic synthetic adapters only;
+  they make no external TikTok calls, accept no arbitrary URLs, and should not
+  be treated as a production content platform integration. Destination
+  credentials are synthetic broker values used only by the trusted local fake
+  adapter; safe receipts store references, never credential values or content.
+  The adapter does not claim network isolation. Destination status/revision
+  changes invalidate related approval claims and are rechecked before the
+  adapter callback.
 - No CSRF protection
 - No per-Agent container boundary in ECS mode
 - Ordinary local containers, not hardened multi-tenant sandboxes

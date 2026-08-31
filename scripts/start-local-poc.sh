@@ -165,14 +165,14 @@ export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-3000}"
 export CODEX_SANDBOX_MODE="$codex_sandbox_mode"
 export RUNTIME_PROVIDER=container
-export AGENTGATE_SECURITY_LAB_ENABLED="${AGENTGATE_SECURITY_LAB_ENABLED:-true}"
+export NAWGATE_SECURITY_LAB_ENABLED="${NAWGATE_SECURITY_LAB_ENABLED:-true}"
 export CONTAINER_ENGINE="$engine"
 export CONTAINER_RUNTIME_IMAGE="$runtime_image"
-if [[ -z "${AGENTGATE_GATEWAY_URL:-}" ]]; then
+if [[ -z "${NAWGATE_GATEWAY_URL:-}" ]]; then
   if [[ "$(basename "$engine")" == "podman" ]]; then
-    export AGENTGATE_GATEWAY_URL="http://host.containers.internal:$PORT"
+    export NAWGATE_GATEWAY_URL="http://host.containers.internal:$PORT"
   else
-    export AGENTGATE_GATEWAY_URL="http://host.docker.internal:$PORT"
+    export NAWGATE_GATEWAY_URL="http://host.docker.internal:$PORT"
   fi
 fi
 if [[ -z "${APP_AUTH_TOKEN:-}" ]]; then
@@ -229,10 +229,10 @@ if [[ "$(basename "$engine")" == "docker" ]]; then
   probe_args+=(--add-host host.docker.internal:host-gateway)
 fi
 if ! "$engine" "${probe_args[@]}" \
-  --env "AGENTGATE_PROBE_URL=$AGENTGATE_GATEWAY_URL" \
+  --env "NAWGATE_PROBE_URL=$NAWGATE_GATEWAY_URL" \
   "$runtime_image" node -e \
-  'fetch(process.env.AGENTGATE_PROBE_URL + "/api/health").then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))'; then
-  log "The Agent Runtime cannot reach $AGENTGATE_GATEWAY_URL."
+  'fetch(process.env.NAWGATE_PROBE_URL + "/api/health").then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))'; then
+  log "The Agent Runtime cannot reach $NAWGATE_GATEWAY_URL."
   exit 2
 fi
 

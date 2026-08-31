@@ -2,25 +2,33 @@ import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
-import { ApprovalError, ApprovalService } from "./agentgate/approval-service.js";
-import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
-import { AuditService } from "./agentgate/audit-service.js";
-import { IdentityService } from "./agentgate/identity-service.js";
-import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
-import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
+import { ApprovalError, ApprovalService } from "./nawgate/approval-service.js";
+import { ApprovalAuthorityService } from "./nawgate/approval-authority-service.js";
+import { AgentTeamGrantService } from "./nawgate/agent-team-grant-service.js";
+import { AuditService } from "./nawgate/audit-service.js";
+import { getReplay } from "./nawgate/flight-recorder.js";
+import { IdentityService } from "./nawgate/identity-service.js";
+import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
+import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
+import { TeamMembershipService } from "./nawgate/team-membership-service.js";
 import {
   SECURITY_LAB_SCENARIOS,
   SecurityLabService,
-} from "./agentgate/security-lab-service.js";
-import { AGENTGATE_POLICY_VERSION, type GatewayResult, type TrustedRuntimeContext } from "./agentgate/types.js";
+} from "./nawgate/security-lab-service.js";
+import { NAWGATE_POLICY_VERSION, type GatewayResult, type TrustedRuntimeContext } from "./nawgate/types.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
+const agentReplayParams = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+});
 const createAgentBody = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().max(500).optional(),
@@ -34,13 +42,34 @@ const messageBody = z.object({
   content: z.string().trim().min(1).max(50_000),
 });
 const demoSessionBody = z.object({
-  userId: z.enum(["user-a", "user-b"]),
+  userId: z.enum(["user-a", "user-b", "user-c"]),
 }).strict();
+const teamMembershipBody = z.object({
+  memberId: z.enum(["user-a", "user-b", "user-c"]),
+  teamId: z.enum(["team-alpha", "team-beta"]),
+  role: z.enum(["viewer", "editor", "admin"]),
+}).strict();
+const removeTeamMembershipBody = z.object({
+  memberId: z.enum(["user-a", "user-b", "user-c"]),
+  teamId: z.enum(["team-alpha", "team-beta"]),
+}).strict();
+const emptyBody = z.object({}).strict();
 const runtimeActionBody = z.object({
   requestId: z.string().uuid(),
-  action: z.enum(["resource.read", "file.read", "deploy.staging", "deploy.production"]),
+  action: z.enum([
+    "resource.read",
+    "file.read",
+    "deploy.staging",
+    "deploy.production",
+    "content.moderate",
+    "content.disclose",
+    "content.publish",
+    "content.export",
+  ]),
   resourceId: z.string().min(1).max(120),
   approvalId: z.string().uuid().optional(),
+  payload: z.unknown().optional(),
+  destination: z.string().trim().min(1).max(256).nullable().optional(),
 }).strict();
 const runtimeApprovalParams = z.object({ id: z.string().uuid() });
 const approvalQuery = z.object({
@@ -69,14 +98,16 @@ export interface RuntimeApiDependencies {
   approvals: ApprovalService;
   audit: AuditService;
   grants?: AgentTeamGrantService;
+  memberships?: TeamMembershipService;
   securityLab?: SecurityLabService;
+  authorities?: ApprovalAuthorityService;
 }
 
 function runtimeContext(
   request: { headers: Record<string, string | string[] | undefined> },
   runtime: RuntimeApiDependencies,
 ): TrustedRuntimeContext | null {
-  const header = request.headers["x-agentgate-runtime"];
+  const header = request.headers["x-nawgate-runtime"];
   const token = typeof header === "string" ? header : undefined;
   const resolved = runtime.credentials.resolve(token);
   if (resolved.status === "valid") return resolved.context;
@@ -95,7 +126,8 @@ function publicGatewayCode(reasonCode: string): string {
   if (
     reasonCode === "approval_denied" ||
     reasonCode === "capability_consumed" ||
-    reasonCode === "capability_revoked"
+    reasonCode === "capability_revoked" ||
+    reasonCode === "approval_authority_revoked"
   ) {
     return "APPROVAL_DENIED";
   }
@@ -106,7 +138,7 @@ function publicGatewayCode(reasonCode: string): string {
 function rejectedRuntimeFieldNames(error: z.ZodError): string[] {
   const safeNames = new Set([
     "requestId", "action", "resourceId", "approvalId", "humanId", "ownerUserId", "agentId", "runId",
-    "teamId", "role", "memberships", "agentGrants", "policyOutcome",
+    "teamId", "role", "memberships", "agentGrants", "policyOutcome", "payload", "destination",
   ]);
   const names = new Set<string>();
   for (const issue of error.issues) {
@@ -143,9 +175,21 @@ function sendRuntimeResult(reply: {
       approvalId: result.approvalId,
       pollAfterMs: RUNTIME_POLL_AFTER_MS,
       reasonCode: result.reasonCode,
+      risk: result.risk,
+      requiredApprovalCount: result.requiredApprovalCount,
+      requiredApprovalRoles: result.requiredApprovalRoles,
     });
   }
   if (result.status === "denied") {
+    if (result.reasonCode === "audit_integrity_broken") {
+      return reply.code(503).send({
+        status: "denied",
+        requestId: result.requestId,
+        code: "AUDIT_INTEGRITY_BROKEN",
+        reasonCode: result.reasonCode,
+        message: "Protected actions are temporarily disabled because audit integrity could not be verified.",
+      });
+    }
     return reply.code(403).send({
       status: "denied",
       requestId: result.requestId,
@@ -195,6 +239,7 @@ export async function createApp(
   service: AgentService,
   identity: IdentityService = new IdentityService(),
   runtime?: RuntimeApiDependencies,
+  loggerStream?: Writable,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -202,9 +247,10 @@ export async function createApp(
       redact: [
         "req.headers.authorization",
         "req.headers.cookie",
-        "req.headers.x-agentgate-session",
-        "req.headers.x-agentgate-runtime",
+        "req.headers.x-nawgate-session",
+        "req.headers.x-nawgate-runtime",
       ],
+      ...(loggerStream ? { stream: loggerStream } : {}),
     },
     bodyLimit: 1_048_576,
   });
@@ -248,8 +294,8 @@ export async function createApp(
 
   const humanActor = (request: { headers: Record<string, string | string[] | undefined> }) =>
     identity.requireSession(
-      typeof request.headers["x-agentgate-session"] === "string"
-        ? request.headers["x-agentgate-session"]
+      typeof request.headers["x-nawgate-session"] === "string"
+        ? request.headers["x-nawgate-session"]
         : undefined,
     );
 
@@ -259,6 +305,28 @@ export async function createApp(
     const body = demoSessionBody.parse(request.body);
     return identity.createSession(body.userId);
   });
+
+  if (runtime?.memberships) {
+    app.get("/api/demo/me/team-memberships", async (request) => ({
+      memberships: runtime.memberships!.resolveMemberships(humanActor(request).id),
+    }));
+
+    app.get("/api/demo/team-memberships", async (request) => ({
+      memberships: runtime.memberships!.resolveManageableMemberships(humanActor(request).id),
+    }));
+
+    app.post("/api/demo/team-memberships", async (request, reply) => {
+      const body = teamMembershipBody.parse(request.body);
+      const membership = await runtime.memberships!.addMembership(body, humanActor(request));
+      return reply.code(201).send({ membership });
+    });
+
+    app.post("/api/demo/team-memberships/remove", async (request) => {
+      const body = removeTeamMembershipBody.parse(request.body);
+      const membership = await runtime.memberships!.removeMembership(body, humanActor(request));
+      return { membership };
+    });
+  }
 
   app.get("/api/demo/me", async (request) => ({ user: humanActor(request) }));
 
@@ -316,8 +384,33 @@ export async function createApp(
       const query = auditQuery.parse(request.query);
       const actor = humanActor(request);
       service.getAgent(id, actor);
-      const events = runtime.audit.list(id, query.runId);
-      return { audit: events.slice(Math.max(0, events.length - query.limit)) };
+      const integrity = await runtime.audit.integrity();
+      return {
+        audit:
+          integrity.status === "broken"
+            ? []
+            : runtime.audit.list(id, query.runId).slice(-query.limit),
+        integrity,
+      };
+    });
+
+    app.get("/api/agents/:id/replays/:runId", async (request, reply) => {
+      const { id, runId } = agentReplayParams.parse(request.params);
+      const actor = humanActor(request);
+      service.getAgent(id, actor);
+      const integrity = await runtime.audit.integrity();
+      if (integrity.status === "broken") {
+        return reply.code(503).send({
+          code: "AUDIT_INTEGRITY_BROKEN",
+          error: "Flight replay is temporarily unavailable because audit integrity could not be verified.",
+          integrity,
+        });
+      }
+      const replay = await getReplay(id, runId, config.dataDirectory);
+      if (!replay) {
+        throw new HttpError(404, "Flight replay not found");
+      }
+      return { replay };
     });
 
     app.post("/api/agents/:id/revoke-access", async (request) => {
@@ -344,7 +437,7 @@ export async function createApp(
         capabilityId: null,
         status: "success",
         durationMs: null,
-        policyVersion: AGENTGATE_POLICY_VERSION,
+        policyVersion: NAWGATE_POLICY_VERSION,
         explanation: "The owner revoked the active Run authority; future protected requests fail closed.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: false,
@@ -358,6 +451,7 @@ export async function createApp(
 
     app.post("/api/approvals/:id/approve", async (request) => {
       const { id } = runtimeApprovalParams.parse(request.params);
+      if (request.body !== undefined) emptyBody.parse(request.body);
       const actor = humanActor(request);
       try {
         const result = await runtime.approvals.approve(id, actor.id);
@@ -369,6 +463,7 @@ export async function createApp(
 
     app.post("/api/approvals/:id/deny", async (request) => {
       const { id } = runtimeApprovalParams.parse(request.params);
+      if (request.body !== undefined) emptyBody.parse(request.body);
       const actor = humanActor(request);
       try {
         return { approval: await runtime.approvals.deny(id, actor.id) };
@@ -397,7 +492,7 @@ export async function createApp(
           capabilityId: null,
           status: "failure",
           durationMs: null,
-          policyVersion: AGENTGATE_POLICY_VERSION,
+          policyVersion: NAWGATE_POLICY_VERSION,
           explanation: "The RuntimeGateway API boundary rejected untrusted malformed request attributes.",
           enforcementPoint: "RuntimeGateway/API boundary",
           protectedActionExecuted: false,
@@ -411,6 +506,8 @@ export async function createApp(
         action: body.action,
         resourceId: body.resourceId,
         ...(body.approvalId ? { approvalId: body.approvalId } : {}),
+        ...(body.payload !== undefined ? { payload: body.payload } : {}),
+        ...(body.destination !== undefined ? { destination: body.destination } : {}),
       });
       return sendRuntimeResult(reply, result);
     });
@@ -517,6 +614,21 @@ export async function createApp(
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id, humanActor(request)) };
+  });
+
+  app.get("/api/agents/:id/team-runs/latest", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { teamRun: service.getLatestTeamRun(id, humanActor(request)) };
+  });
+
+  app.get("/api/teams/:teamId/runs/latest", async (request) => {
+    const { teamId } = z.object({ teamId: z.string().min(1) }).parse(request.params);
+    return { teamRun: service.getLatestTeamRun(teamId, humanActor(request)) };
+  });
+
+  app.get("/api/team-runs/:id", async (request) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    return { teamRun: service.getTeamRun(id, humanActor(request)) };
   });
 
   if (config.nodeEnv === "production") {

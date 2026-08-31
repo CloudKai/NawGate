@@ -80,11 +80,11 @@ export function buildContainerRunArgs(
     "--env",
     "NO_COLOR=1",
     "--env",
-    "AGENTGATE_RUNTIME_TOKEN",
+    "NAWGATE_RUNTIME_TOKEN",
     "--env",
-    "AGENTGATE_GATEWAY_URL",
+    "NAWGATE_GATEWAY_URL",
     "--env",
-    "AGENTGATE_APPROVAL_WAIT_MS",
+    "NAWGATE_APPROVAL_WAIT_MS",
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
@@ -260,9 +260,9 @@ export class ContainerCodexRunner implements AgentRunner {
       if (process.env[name] !== undefined) environment[name] = process.env[name];
     }
     if (request?.runtime) {
-      environment.AGENTGATE_RUNTIME_TOKEN = request.runtime.token;
-      environment.AGENTGATE_GATEWAY_URL = request.runtime.gatewayUrl;
-      environment.AGENTGATE_APPROVAL_WAIT_MS = String(request.runtime.approvalWaitMs);
+      environment.NAWGATE_RUNTIME_TOKEN = request.runtime.token;
+      environment.NAWGATE_GATEWAY_URL = request.runtime.gatewayUrl;
+      environment.NAWGATE_APPROVAL_WAIT_MS = String(request.runtime.approvalWaitMs);
     }
     return environment;
   }

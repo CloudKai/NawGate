@@ -1,6 +1,6 @@
-# AgentGate for CloudKai/CodeJam — Codex Implementation Context
+# NawGate for CloudKai/CodeJam — Codex Implementation Context
 
-This package is an implementation contract for building **AgentGate**, a risk-aware delegated-access middleware layer on top of the official `CloudKai/CodeJam` Agent Launchpad starter.
+This package is an implementation contract for building **NawGate**, a risk-aware delegated-access middleware layer on top of the official `CloudKai/CodeJam` Agent Launchpad starter.
 
 Put this package into the root of the CodeJam repository, keep `AGENTS.md` at the repository root, then ask Codex/Luna to follow `CODEX-LUNA-START.md`.
 

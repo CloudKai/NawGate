@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
-import { AgentGatePanel } from "./components/agentgate/AgentGatePanel";
-import { DemoActorSwitch } from "./components/agentgate/DemoActorSwitch";
+import { NawGatePanel } from "./components/nawgate/NawGatePanel";
+import { DemoActorSwitch } from "./components/nawgate/DemoActorSwitch";
+import { TeamMembershipPanel } from "./components/nawgate/TeamMembershipPanel";
+import { TeamGraphVisualizer } from "./components/nawgate/TeamGraphVisualizer";
 import type {
   Agent,
   AgentTeamGrant,
   AgentRun,
   ApprovalRecord,
   AuditEvent,
+  AuditIntegrityReport,
   HumanId,
   HumanPrincipal,
   Message,
   SystemInfo,
+  TeamId,
+  TeamMembership,
+  TeamRole,
+  TeamRun,
 } from "./types";
 
 const starterPrompts = [
@@ -57,10 +64,16 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [activeTeamRun, setActiveTeamRun] = useState<TeamRun | null>(null);
+  const [showDAGDrawer, setShowDAGDrawer] = useState(false);
   const [actor, setActor] = useState<HumanPrincipal | null>(null);
+  const [users, setUsers] = useState<HumanPrincipal[]>([]);
+  const [memberships, setMemberships] = useState<TeamMembership[]>([]);
+  const [manageableMemberships, setManageableMemberships] = useState<TeamMembership[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [auditIntegrity, setAuditIntegrity] = useState<AuditIntegrityReport | null>(null);
   const [grants, setGrants] = useState<AgentTeamGrant[]>([]);
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
   const [revocationBusy, setRevocationBusy] = useState(false);
@@ -79,6 +92,23 @@ export default function App() {
     () => agents.find((agent) => agent.id === selectedId) ?? null,
     [agents, selectedId],
   );
+
+  const selectedAgentGrant = useMemo(
+    () => grants.find((g) => g.agentId === selected?.id && g.status === "active") ?? null,
+    [grants, selected],
+  );
+
+  const teamMembers = useMemo(() => {
+    if (!selectedAgentGrant) return [];
+    const teamAgentIds = new Set(
+      grants
+        .filter((g) => g.teamId === selectedAgentGrant.teamId && g.status === "active")
+        .map((g) => g.agentId),
+    );
+    return agents.filter((a) => teamAgentIds.has(a.id));
+  }, [grants, selectedAgentGrant, agents]);
+
+  const isMultiAgentTeam = teamMembers.length > 1;
 
   const refreshAgents = useCallback(async (selectFirst = true) => {
     const { agents: next } = await api.listAgents();
@@ -99,23 +129,36 @@ export default function App() {
   }, []);
 
   const refreshGate = useCallback(async (agentId: string) => {
-    const [pendingResult, allApprovalResult, auditResult, grantResult] = await Promise.all([
+    const [pendingResult, allApprovalResult, auditResult, grantResult, teamRunResult] = await Promise.all([
       api.approvals(agentId, "pending"),
       api.approvals(agentId),
       api.audit(agentId),
       api.teamGrants(agentId),
+      api.latestTeamRun(agentId).catch(() => ({ teamRun: null })),
     ]);
     if (mountedRef.current && selectedIdRef.current === agentId) {
       setApprovals(pendingResult.approvals);
       setApprovalHistory(allApprovalResult.approvals);
       setAudit(auditResult.audit);
+      setAuditIntegrity(auditResult.integrity);
       setGrants(grantResult.grants);
+      if (teamRunResult.teamRun) {
+        setActiveTeamRun(teamRunResult.teamRun);
+      }
     }
   }, []);
 
   const bootstrap = useCallback(async () => {
     const session = await api.demoSession("user-a");
     setActor(session.user);
+    const [userResult, membershipResult, manageableResult] = await Promise.all([
+      api.demoUsers(),
+      api.teamMemberships(),
+      api.manageableTeamMemberships(),
+    ]);
+    setUsers(userResult.users);
+    setMemberships(membershipResult.memberships);
+    setManageableMemberships(manageableResult.memberships);
     await Promise.all([refreshAgents(), api.system().then(setSystem)]);
   }, [refreshAgents]);
 
@@ -136,21 +179,31 @@ export default function App() {
 
   useEffect(() => {
     setActiveRun(null);
+    setActiveTeamRun(null);
     setShowSettings(false);
     setApprovals([]);
     setApprovalHistory([]);
     setAudit([]);
+    setAuditIntegrity(null);
     setGrants([]);
     if (!selectedId) {
       setMessages([]);
       return;
     }
     let cancelled = false;
-    void Promise.all([refreshMessages(selectedId), api.runs(selectedId), refreshGate(selectedId)])
-      .then(([, result]) => {
+    void Promise.all([
+      refreshMessages(selectedId),
+      api.runs(selectedId),
+      refreshGate(selectedId),
+      api.latestTeamRun(selectedId).catch(() => ({ teamRun: null })),
+    ])
+      .then(([, result, , teamRunResult]) => {
         if (selectedIdRef.current !== selectedId) return;
         const latest = result.runs[0] ?? null;
         setActiveRun(latest);
+        if (teamRunResult?.teamRun) {
+          setActiveTeamRun(teamRunResult.teamRun);
+        }
         if (latest && ["queued", "running"].includes(latest.status)) {
           void pollRun(latest.id, selectedId).catch((reason) =>
             selectedIdRef.current === selectedId &&
@@ -180,7 +233,7 @@ export default function App() {
 
   useEffect(() => {
     messageEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeRun]);
+  }, [messages.length]);
 
   const createAgent = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -255,12 +308,25 @@ export default function App() {
     pollingRunIds.current.add(runId);
     try {
       while (mountedRef.current) {
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
         if (!mountedRef.current) return;
-        const result = await api.run(runId);
-        await refreshGate(agentId);
-        if (selectedIdRef.current === agentId) setActiveRun(result.run);
+        const [result, teamRunResult] = await Promise.all([
+          api.run(runId),
+          api.latestTeamRun(agentId).catch(() => ({ teamRun: null })),
+          refreshMessages(agentId),
+          refreshGate(agentId),
+        ]);
+        if (selectedIdRef.current === agentId) {
+          setActiveRun(result.run);
+          if (teamRunResult?.teamRun) {
+            setActiveTeamRun(teamRunResult.teamRun);
+          }
+        }
         if (!["queued", "running"].includes(result.run.status)) {
+          const finalTeam = await api.latestTeamRun(agentId).catch(() => ({ teamRun: null }));
+          if (finalTeam?.teamRun && selectedIdRef.current === agentId) {
+            setActiveTeamRun(finalTeam.teamRun);
+          }
           await Promise.all([refreshMessages(agentId), refreshAgents(), refreshGate(agentId)]);
           return;
         }
@@ -276,7 +342,13 @@ export default function App() {
     setError(null);
     try {
       const session = await api.demoSession(userId);
+      const [membershipResult, manageableResult] = await Promise.all([
+        api.teamMemberships(),
+        api.manageableTeamMemberships(),
+      ]);
       setActor(session.user);
+      setMemberships(membershipResult.memberships);
+      setManageableMemberships(manageableResult.memberships);
       setSelectedId(null);
       setMessages([]);
       setActiveRun(null);
@@ -288,6 +360,58 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const addTeamMembership = async (input: {
+    memberId: HumanId;
+    teamId: TeamId;
+    role: TeamRole;
+  }) => {
+    setError(null);
+    try {
+      const { membership } = await api.addTeamMembership(input);
+      if (membership.humanId === actor?.id) {
+        setMemberships((current) =>
+          current.some(
+            (candidate) =>
+              candidate.teamId === membership.teamId && candidate.humanId === membership.humanId,
+          )
+            ? current
+            : [...current, membership],
+        );
+      }
+      setManageableMemberships((current) =>
+        current.some(
+          (candidate) =>
+            candidate.teamId === membership.teamId && candidate.humanId === membership.humanId,
+        )
+          ? current
+          : [...current, membership],
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const removeTeamMembership = async (input: { memberId: HumanId; teamId: TeamId }) => {
+    setError(null);
+    try {
+      const { membership } = await api.removeTeamMembership(input);
+      setMemberships((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.teamId !== membership.teamId || candidate.humanId !== membership.humanId,
+        ),
+      );
+      setManageableMemberships((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.teamId !== membership.teamId || candidate.humanId !== membership.humanId,
+        ),
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
@@ -359,6 +483,10 @@ export default function App() {
       if (selectedIdRef.current === selected.id) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
+        if (result.teamRun) {
+          setActiveTeamRun(result.teamRun);
+          setShowDAGDrawer(true);
+        }
       }
       setAgents((current) =>
         current.map((agent) =>
@@ -451,6 +579,16 @@ export default function App() {
 
         <DemoActorSwitch actor={actor} disabled={busy} onSwitch={switchActor} />
 
+        <TeamMembershipPanel
+          actor={actor}
+          users={users}
+          memberships={memberships}
+          manageableMemberships={manageableMemberships}
+          disabled={busy}
+          onAdd={addTeamMembership}
+          onRemove={removeTeamMembership}
+        />
+
         <button
           className="button button-primary create-button"
           onClick={() => {
@@ -466,20 +604,28 @@ export default function App() {
           <span>{agents.length}</span>
         </div>
         <nav className="agent-list">
-          {agents.map((agent) => (
-            <button
-              className={"agent-card " + (agent.id === selectedId ? "selected" : "")}
-              key={agent.id}
-              onClick={() => setSelectedId(agent.id)}
-            >
-              <div className="agent-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
-              <div className="agent-card-copy">
-                <strong>{agent.name}</strong>
-                <span>{agent.description || "Coding Agent"}</span>
-              </div>
-              <span className={"mini-dot mini-" + agent.status} />
-            </button>
-          ))}
+          {agents.map((agent) => {
+            const agentGrant = grants.find((g) => g.agentId === agent.id && g.status === "active");
+            return (
+              <button
+                className={"agent-card " + (agent.id === selectedId ? "selected" : "")}
+                key={agent.id}
+                onClick={() => setSelectedId(agent.id)}
+              >
+                <div className="agent-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
+                <div className="agent-card-copy">
+                  <div className="agent-card-name-row">
+                    <strong>{agent.name}</strong>
+                    {agentGrant && (
+                      <span className="agent-team-tag">{agentGrant.teamId}</span>
+                    )}
+                  </div>
+                  <span>{agent.description || "Coding Agent"}</span>
+                </div>
+                <span className={"mini-dot mini-" + agent.status} />
+              </button>
+            );
+          })}
           {agents.length === 0 && (
             <div className="empty-sidebar">
               <span>◇</span>
@@ -610,14 +756,76 @@ export default function App() {
             <section className="playground">
               <div className="playground-topbar">
                 <div>
-                  <span className="eyebrow">Playground</span>
-                  <h2>Build something with your Agent</h2>
+                  {isMultiAgentTeam ? (
+                    <div className="playground-team-header">
+                      <div className="team-pill-badge">
+                        <span className="team-badge-dot" />
+                        <strong>{selectedAgentGrant?.teamId.toUpperCase()}</strong>
+                        <span>Shared Channel</span>
+                      </div>
+                      <div className="team-member-chips">
+                        {teamMembers.map((member) => (
+                          <span
+                            key={member.id}
+                            className={`team-member-chip ${member.id === selected.id ? "current" : ""}`}
+                            title={`${member.name} (${member.status})`}
+                          >
+                            <span className="team-member-avatar-mini">
+                              {member.name.slice(0, 1).toUpperCase()}
+                            </span>
+                            <span className="team-member-name-mini">{member.name}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="eyebrow">Playground</span>
+                      <h2>Build something with {selected.name}</h2>
+                    </>
+                  )}
                 </div>
-                <div className="session-info">
-                  <span className="pulse" />
-                  {selected.codexThreadId ? "Session connected" : "New session"}
+
+                <div className="playground-topbar-actions">
+                  {activeTeamRun && (
+                    <button
+                      type="button"
+                      className={`button button-dag-toggle ${activeTeamRun.status === "running" ? "is-running" : ""}`}
+                      onClick={() => {
+                        setShowDAGDrawer((prev) => !prev);
+                        if (selected) {
+                          void api.latestTeamRun(selected.id).then((res) => {
+                            if (res.teamRun) setActiveTeamRun(res.teamRun);
+                          });
+                        }
+                      }}
+                      title="Toggle DAG Visualizer & Blackboard"
+                    >
+                      <span>Execution Graph</span>
+                      {activeTeamRun.status === "running" ? (
+                        <span className="dag-pulse-dot-sm" />
+                      ) : (
+                        <span className="dag-count-badge">
+                          {activeTeamRun.graph.tasks.filter((t) => t.status === "completed").length}/
+                          {activeTeamRun.graph.tasks.length}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  <div className="session-info">
+                    <span className="pulse" />
+                    {selected.codexThreadId ? "Session connected" : "New session"}
+                  </div>
                 </div>
               </div>
+
+              <TeamGraphVisualizer
+                isOpen={showDAGDrawer}
+                teamRun={activeTeamRun}
+                agents={agents}
+                onClose={() => setShowDAGDrawer(false)}
+              />
 
               <div className="messages">
                 {messages.length === 0 && !activeRun ? (
@@ -643,7 +851,7 @@ export default function App() {
                   messages.map((message) => (
                     <article className={"message message-" + message.role} key={message.id}>
                       <div className="message-meta">
-                        <strong>{message.role === "user" ? "You" : selected.name}</strong>
+                        <strong>{message.role === "user" ? "You" : (message.authorName || selected.name)}</strong>
                         <span>{formatTime(message.createdAt)}</span>
                       </div>
                       <div className="message-body">{message.content}</div>
@@ -653,14 +861,24 @@ export default function App() {
                 {activeRun && ["queued", "running"].includes(activeRun.status) && (
                   <article className="message message-assistant thinking">
                     <div className="message-meta">
-                      <strong>{selected.name}</strong>
-                      <span>working in the Agent workspace</span>
+                      <strong>
+                        {activeTeamRun && ["queued", "running"].includes(activeTeamRun.status)
+                          ? `Team Collaboration (${activeTeamRun.graph.tasks.filter((t) => t.status === "running").length} agents active)`
+                          : selected.name}
+                      </strong>
+                      <span>
+                        {activeTeamRun && ["queued", "running"].includes(activeTeamRun.status)
+                          ? "executing DAG tasks in workspace"
+                          : "working in the Agent workspace"}
+                      </span>
                     </div>
                     <div className="thinking-row">
                       <Spinner />
                       {approvals.length > 0
-                        ? "AgentGate is waiting for owner approval…"
-                        : "Codex is reading, editing, or running commands…"}
+                        ? "NawGate is waiting for owner approval…"
+                        : activeTeamRun && ["queued", "running"].includes(activeTeamRun.status)
+                          ? "Agents are executing DAG tasks concurrently in the workspace…"
+                          : "Codex is reading, editing, or running commands…"}
                     </div>
                   </article>
                 )}
@@ -715,11 +933,12 @@ export default function App() {
               </form>
             </section>
 
-            <AgentGatePanel
+            <NawGatePanel
               agent={selected}
               approvals={approvals}
               approvalHistory={approvalHistory}
               audit={audit}
+              auditIntegrity={auditIntegrity}
               busyApprovalId={approvalBusyId}
               revocationBusy={revocationBusy}
               onApprove={(approvalId) => void decideApproval(approvalId, "approve")}

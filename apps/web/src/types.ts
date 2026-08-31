@@ -1,10 +1,18 @@
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
-export type HumanId = "user-a" | "user-b";
+export type HumanId = "user-a" | "user-b" | "user-c";
+export type TeamId = "team-alpha" | "team-beta";
+export type TeamRole = "viewer" | "editor" | "admin";
 
 export interface HumanPrincipal {
   id: HumanId;
   name: string;
+}
+
+export interface TeamMembership {
+  teamId: TeamId;
+  humanId: HumanId;
+  role: TeamRole;
 }
 
 export interface Agent {
@@ -27,6 +35,59 @@ export interface Message {
   runId: string;
   role: "user" | "assistant";
   content: string;
+  createdAt: string;
+  authorName?: string;
+  teamId?: string | null;
+}
+
+export type TaskNodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface TaskNode {
+  id: string;
+  assignedAgentId: string;
+  title: string;
+  description: string;
+  dependsOn: string[];
+  status: TaskNodeStatus;
+  output?: string;
+  error?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  durationMs?: number | null;
+}
+
+export interface TaskGraph {
+  tasks: TaskNode[];
+}
+
+export type TeamRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface TeamArtifact {
+  id: string;
+  agentId: string;
+  taskId: string;
+  type: "contract" | "file" | "data" | "schema";
+  name: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface TeamBlackboard {
+  state: Record<string, unknown>;
+  artifacts: TeamArtifact[];
+  createdFiles: string[];
+}
+
+export interface TeamRun {
+  id: string;
+  teamId: string;
+  ownerUserId: HumanId;
+  prompt: string;
+  status: TeamRunStatus;
+  graph: TaskGraph;
+  blackboard: TeamBlackboard;
+  startedAt: string | null;
+  completedAt: string | null;
   createdAt: string;
 }
 
@@ -81,14 +142,24 @@ export interface ApprovalRecord {
   agentId: string;
   runId: string;
   requestId: string;
-  action: "resource.read" | "file.read" | "deploy.staging" | "deploy.production";
+  action:
+    | "resource.read"
+    | "file.read"
+    | "deploy.staging"
+    | "deploy.production"
+    | "content.moderate"
+    | "content.disclose"
+    | "content.publish"
+    | "content.export";
   resourceId: string;
-  risk: "high";
+  risk: "low" | "medium" | "high" | "critical";
   reasonCode: string;
   status: "pending" | "approved" | "denied" | "expired" | "consumed" | "revoked";
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
+  destination: string | null;
+  destinationRevision: number | null;
   grantId?: string;
   teamId?: "team-alpha" | "team-beta";
   bundleVersion?: number;
@@ -97,6 +168,21 @@ export interface ApprovalRecord {
   agentRole?: "viewer" | "editor" | "admin";
   resourceClassification?: "internal" | "sensitive" | "restricted";
   temporaryScope?: string[];
+  requesterHumanId: HumanId;
+  riskVersion: string;
+  riskFactsDigest: string;
+  requiredApprovalCount: number;
+  requiredApprovalRoles: ("owner" | "independent_reviewer")[];
+  approvalDecisions: {
+    humanId: HumanId;
+    authorityId: string;
+    authorityRevision: number;
+    role: "owner" | "independent_reviewer";
+    decision: "approve" | "deny";
+    decidedAt: string;
+  }[];
+  organizationId: string;
+  accountId: string | null;
 }
 
 export interface AuditEvent {
@@ -107,10 +193,19 @@ export interface AuditEvent {
   agentId: string | null;
   runId: string | null;
   requestId: string | null;
-  action: "resource.read" | "file.read" | "deploy.staging" | "deploy.production" | null;
+  action:
+    | "resource.read"
+    | "file.read"
+    | "deploy.staging"
+    | "deploy.production"
+    | "content.moderate"
+    | "content.disclose"
+    | "content.publish"
+    | "content.export"
+    | null;
   resourceId: string | null;
   decision: "allow" | "deny" | "require_approval" | null;
-  risk: "low" | "medium" | "high" | null;
+  risk: "low" | "medium" | "high" | "critical" | null;
   reasonCode: string | null;
   approvalId: string | null;
   capabilityId: string | null;
@@ -129,6 +224,26 @@ export interface AuditEvent {
   resourceClassification: "internal" | "sensitive" | "restricted" | null;
   temporaryScope: string[] | null;
   rejectedFieldNames: string[] | null;
+  riskVersion: string | null;
+  riskFactsDigest: string | null;
+  requiredApprovalCount: number | null;
+  requiredApprovalRoles: ("owner" | "independent_reviewer")[] | null;
+  approvalDecisions: ApprovalRecord["approvalDecisions"] | null;
+  integrityVersion: "nawgate-audit-v1" | null;
+  sequence: number | null;
+  previousHash: string | null;
+  eventHash: string | null;
+}
+
+export interface AuditIntegrityReport {
+  status: "verified" | "broken" | "not_yet_verified";
+  integrityVersion: "nawgate-audit-v1";
+  verifiedAt: string;
+  headSequence: number;
+  chainedEventCount: number;
+  unverifiedLegacyEventCount: number;
+  reasonCode: string;
+  firstBrokenSequence: number | null;
 }
 
 export type SecurityLabScenario =
@@ -164,4 +279,23 @@ export interface SecurityLabResult {
   enforcementPoint: string;
   protectedActionExecuted: boolean;
   summary: string;
+}
+
+export interface ReplayPayload {
+  runId: string;
+  agentId: string;
+  ownerUserId: HumanId;
+  prompt: string;
+  output: string | null;
+  error: string | null;
+  status: RunStatus;
+  usage: {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+  } | null;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  auditEvents: AuditEvent[];
 }

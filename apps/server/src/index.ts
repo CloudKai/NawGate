@@ -1,14 +1,19 @@
 import path from "node:path";
 import { AgentService } from "./agent-service.js";
-import { ApprovalService } from "./agentgate/approval-service.js";
-import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
-import { AuditService } from "./agentgate/audit-service.js";
-import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
-import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
-import { IdentityService } from "./agentgate/identity-service.js";
-import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
-import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
-import { SecurityLabService } from "./agentgate/security-lab-service.js";
+import { ApprovalService } from "./nawgate/approval-service.js";
+import { ApprovalAuthorityService } from "./nawgate/approval-authority-service.js";
+import { AgentTeamGrantService } from "./nawgate/agent-team-grant-service.js";
+import { AuditService } from "./nawgate/audit-service.js";
+import { DeterministicPolicyEngine } from "./nawgate/policy-engine.js";
+import { ProtectedResourceService } from "./nawgate/protected-resource-service.js";
+import { IdentityService } from "./nawgate/identity-service.js";
+import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
+import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
+import { DestinationCatalogueService } from "./nawgate/destination-catalogue.js";
+import { ServerSideCredentialBroker } from "./nawgate/destination-broker.js";
+import { LocalDestinationAdapter } from "./nawgate/local-destination-adapter.js";
+import { SecurityLabService } from "./nawgate/security-lab-service.js";
+import { TeamMembershipService } from "./nawgate/team-membership-service.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
 import { createRunner } from "./runner-factory.js";
@@ -21,10 +26,18 @@ await writeCodexConfig(config);
 const store = new JsonStore(path.join(config.dataDirectory, "launchpad.json"));
 const workspaces = new WorkspaceManager(config.workspaceRoot);
 const audit = new AuditService(store);
-const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const approvals = new ApprovalService(store, audit);
+const authorities = new ApprovalAuthorityService(store, approvals, audit);
+const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
-const resources = new ProtectedResourceService(store);
+const memberships = new TeamMembershipService(store);
+const destinations = new DestinationCatalogueService(store, approvals);
+const destinationAdapter = new LocalDestinationAdapter(
+  store,
+  destinations,
+  new ServerSideCredentialBroker(),
+);
+const resources = new ProtectedResourceService(store, approvals, destinationAdapter);
 const gateway = new RuntimeGateway(
   new DeterministicPolicyEngine(),
   resources,
@@ -34,11 +47,12 @@ const gateway = new RuntimeGateway(
   undefined,
   grants,
   credentials,
+  destinations,
 );
 const securityLab = new SecurityLabService(gateway, approvals, audit, credentials, grants);
-const runner = createRunner(config, store, { credentials, audit });
+const runner = createRunner(config, store, { credentials, audit, approvals });
 const identity = new IdentityService();
-const service = new AgentService(config, store, workspaces, runner);
+const service = new AgentService(config, store, workspaces, runner, approvals, audit);
 await service.initialize();
 
 const app = await createApp(config, service, identity, {
@@ -47,7 +61,9 @@ const app = await createApp(config, service, identity, {
   approvals,
   audit,
   grants,
+  memberships,
   securityLab,
+  authorities,
 });
 
 const shutdown = async (signal: string) => {

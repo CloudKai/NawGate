@@ -1,10 +1,10 @@
-# AGENTS.md — AgentGate Implementation Contract
+# AGENTS.md — NawGate Implementation Contract
 
 Every coding agent working in this repository MUST follow this file.
 
 ## Mission
 
-Build **AgentGate**, a backend-enforced delegated-access middleware for the existing CloudKai/CodeJam Agent Launchpad.
+Build **NawGate**, a backend-enforced delegated-access middleware for the existing CloudKai/CodeJam Agent Launchpad.
 
 Primary TechJam story: **Bouncer — identity and authorization**.
 
@@ -16,8 +16,8 @@ Do not turn this into several unrelated middleware tracks.
 
 1. actual repository code and tests;
 2. this `AGENTS.md`;
-3. tracked `docs/agentgate/overview.md`, `docs/agentgate/architecture.md`,
-   `docs/agentgate/decisions.md`, and `docs/agentgate/demo.md`;
+3. tracked `docs/nawgate/overview.md`, `docs/nawgate/architecture.md`,
+   `docs/nawgate/decisions.md`, and `docs/nawgate/demo.md`;
 4. remaining tracked documentation;
 5. local `context/` and `design/` files, when present, as non-authoritative
    planning artifacts;
@@ -105,7 +105,7 @@ claim that every internal Codex shell operation is forcibly terminated.
 
 ### Policy evidence
 
-Meaningful policy decisions carry the central AgentGate policy version,
+Meaningful policy decisions carry the central NawGate policy version,
 explanation, enforcement point, and whether a protected side effect executed.
 The Web UI may display a safe Delegation Receipt, but never a secret or
 protected payload.
@@ -160,7 +160,7 @@ Do NOT add OPA, SPIRE, OpenTelemetry Collector, Temporal, Redis, Postgres, Kuber
 ## Recommended module boundaries
 
 ```text
-apps/server/src/agentgate/
+apps/server/src/nawgate/
   types.ts
   demo-users.ts
   identity-service.ts
@@ -178,9 +178,9 @@ apps/server/src/agentgate/
 Frontend additions should be isolated approximately under:
 
 ```text
-apps/web/src/components/agentgate/
+apps/web/src/components/nawgate/
   DemoActorSwitch.tsx
-  AgentGatePanel.tsx
+  NawGatePanel.tsx
   ApprovalCard.tsx
   AuditTimeline.tsx
   DelegationReceipt.tsx
@@ -189,7 +189,7 @@ apps/web/src/components/agentgate/
 ## Security coding rules
 
 - Never print environment variables.
-- Never log AgentGate runtime/session headers.
+- Never log NawGate runtime/session headers.
 - Never put real secrets in tests.
 - Never audit protected resource contents.
 - Never use an LLM for authorization/risk/approval/redaction.
@@ -233,7 +233,7 @@ MVP is not done until:
 
 ## Scope boundary
 
-AgentGate protects **registered protected actions** routed through its gateway.
+NawGate protects **registered protected actions** routed through its gateway.
 
 It does not claim to intercept every internal Codex shell command/file operation. The current CodeJam `AgentRunner` wraps a whole Run, not every internal tool call.
 

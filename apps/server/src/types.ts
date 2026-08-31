@@ -4,10 +4,29 @@ import type {
   AuditEvent,
   DeploymentState,
   HumanId,
+  ApprovalAuthority,
   ProtectedResource,
   AgentTeamGrant,
   TeamMembership,
-} from "./agentgate/types.js";
+  RegisteredDestination,
+  DestinationSideEffectReceipt,
+  AuditChainState,
+  TaskNode,
+  TaskGraph,
+  TeamRun,
+  TeamBlackboard,
+  TeamArtifact,
+  TeamRunStatus,
+} from "./nawgate/types.js";
+
+export type {
+  TaskNode,
+  TaskGraph,
+  TeamRun,
+  TeamBlackboard,
+  TeamArtifact,
+  TeamRunStatus,
+};
 
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -34,6 +53,8 @@ export interface Message {
   role: MessageRole;
   content: string;
   createdAt: string;
+  authorName?: string;
+  teamId?: string | null;
 }
 
 export interface RunUsage {
@@ -56,7 +77,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 4;
+  version: 8;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -67,6 +88,12 @@ export interface Database {
   actionExecutions: ActionExecutionRecord[];
   teamMemberships: TeamMembership[];
   agentTeamGrants: AgentTeamGrant[];
+  capabilityClaims: import("./nawgate/types.js").CapabilityClaim[];
+  registeredDestinations: RegisteredDestination[];
+  destinationReceipts: DestinationSideEffectReceipt[];
+  approvalAuthorities: ApprovalAuthority[];
+  auditChain: AuditChainState;
+  teamRuns: TeamRun[];
 }
 
 export interface CreateAgentInput {

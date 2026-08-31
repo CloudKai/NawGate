@@ -4,11 +4,17 @@ import type {
   AgentTeamGrant,
   ApprovalRecord,
   AuditEvent,
+  AuditIntegrityReport,
   HumanId,
   Message,
+  ReplayPayload,
   SystemInfo,
   SecurityLabResult,
   SecurityLabScenario,
+  TeamId,
+  TeamMembership,
+  TeamRole,
+  TeamRun,
 } from "./types";
 
 export class ApiError extends Error {
@@ -33,7 +39,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...(options?.body ? { "Content-Type": "application/json" } : {}),
     ...(authToken ? { Authorization: "Bearer " + authToken } : {}),
     ...(humanSessionToken
-      ? { "X-AgentGate-Session": humanSessionToken }
+      ? { "X-NawGate-Session": humanSessionToken }
       : {}),
     ...options?.headers,
   };
@@ -71,13 +77,28 @@ export const api = {
     humanSessionToken = session.sessionToken;
     return session;
   },
+  demoUsers: () => request<{ users: { id: HumanId; name: string }[] }>("/api/demo/users"),
+  teamMemberships: () =>
+    request<{ memberships: TeamMembership[] }>("/api/demo/me/team-memberships"),
+  manageableTeamMemberships: () =>
+    request<{ memberships: TeamMembership[] }>("/api/demo/team-memberships"),
+  addTeamMembership: (body: { memberId: HumanId; teamId: TeamId; role: TeamRole }) =>
+    request<{ membership: TeamMembership }>("/api/demo/team-memberships", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeTeamMembership: (body: { memberId: HumanId; teamId: TeamId }) =>
+    request<{ membership: TeamMembership }>("/api/demo/team-memberships/remove", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   approvals: (id: string, status?: ApprovalRecord["status"]) =>
     request<{ approvals: ApprovalRecord[] }>(
       "/api/agents/" + id + "/approvals" +
         (status ? "?status=" + encodeURIComponent(status) : ""),
     ),
   audit: (id: string, runId?: string, limit = 20) =>
-    request<{ audit: AuditEvent[] }>(
+    request<{ audit: AuditEvent[]; integrity: AuditIntegrityReport }>(
       "/api/agents/" +
         id +
         "/audit?limit=" +
@@ -161,7 +182,7 @@ export const api = {
   runs: (id: string) =>
     request<{ runs: AgentRun[] }>("/api/agents/" + id + "/runs"),
   sendMessage: (id: string, content: string) =>
-    request<{ run: AgentRun; message: Message }>(
+    request<{ run: AgentRun; message: Message; teamRun?: TeamRun }>(
       "/api/agents/" + id + "/messages",
       {
         method: "POST",
@@ -169,4 +190,9 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  latestTeamRun: (agentId: string) =>
+    request<{ teamRun: TeamRun | null }>("/api/agents/" + agentId + "/team-runs/latest"),
+  teamRun: (id: string) => request<{ teamRun: TeamRun }>("/api/team-runs/" + id),
+  getReplay: (agentId: string, runId: string) =>
+    request<{ replay: ReplayPayload }>("/api/agents/" + agentId + "/replays/" + runId),
 };

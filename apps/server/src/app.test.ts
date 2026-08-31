@@ -37,7 +37,7 @@ describe("HTTP boundary", () => {
       url: "/api/agents",
       headers: {
         authorization: "Bearer a-strong-test-token",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
     });
     expect(allowed.statusCode).toBe(200);
@@ -46,7 +46,7 @@ describe("HTTP boundary", () => {
       url: "/api/demo/me",
       headers: {
         authorization: "Bearer a-strong-test-token",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
     });
     expect(me.json()).toEqual({ user: { id: "user-a", name: "User A" } });

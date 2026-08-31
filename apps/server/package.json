@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:container": "RUN_CONTAINER_SMOKE=1 vitest run src/agentgate/container-smoke.integration.test.ts",
+    "test:container": "RUN_CONTAINER_SMOKE=1 vitest run src/nawgate/container-smoke.integration.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

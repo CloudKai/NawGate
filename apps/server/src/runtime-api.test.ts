@@ -1,15 +1,21 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { ApprovalService } from "./agentgate/approval-service.js";
-import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
-import { AuditService } from "./agentgate/audit-service.js";
-import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
-import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
-import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
-import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
-import { SecurityLabService } from "./agentgate/security-lab-service.js";
+import { ApprovalService } from "./nawgate/approval-service.js";
+import { AgentTeamGrantService } from "./nawgate/agent-team-grant-service.js";
+import { AuditService } from "./nawgate/audit-service.js";
+import { DeterministicPolicyEngine } from "./nawgate/policy-engine.js";
+import { ProtectedResourceService } from "./nawgate/protected-resource-service.js";
+import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
+import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
+import { SecurityLabService } from "./nawgate/security-lab-service.js";
+import { TeamMembershipService } from "./nawgate/team-membership-service.js";
+import { DestinationCatalogueService } from "./nawgate/destination-catalogue.js";
+import { LocalDestinationAdapter } from "./nawgate/local-destination-adapter.js";
+import { ServerSideCredentialBroker } from "./nawgate/destination-broker.js";
+import { CONTENT_DESTINATIONS } from "./nawgate/content-model.js";
 import { createApp, type RuntimeApiDependencies } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { AgentService } from "./agent-service.js";
@@ -45,15 +51,21 @@ afterEach(async () => {
 });
 
 async function makeRuntimeApp(
-  options: { securityLabEnabled?: boolean } = {},
+  options: {
+    securityLabEnabled?: boolean;
+    destinationCredentials?: ReadonlyMap<string, string>;
+    loggerStream?: PassThrough;
+    dataDirectory?: string;
+  } = {},
 ): Promise<{
   app: Awaited<ReturnType<typeof createApp>>;
   runtime: RuntimeApiDependencies;
   resources: ProtectedResourceService;
   store: JsonStore;
   grants: AgentTeamGrantService;
+  root: string;
 }> {
-  const root = await mkdtemp(path.join(tmpdir(), "agentgate-runtime-api-test-"));
+  const root = await mkdtemp(path.join(tmpdir(), "nawgate-runtime-api-test-"));
   temporaryDirectories.push(root);
   const store = new JsonStore(path.join(root, "db.json"));
   await store.initialize();
@@ -90,9 +102,16 @@ async function makeRuntimeApp(
   });
   const audit = new AuditService(store);
   const approvals = new ApprovalService(store, audit);
-  const resources = new ProtectedResourceService(store);
+  const destinations = new DestinationCatalogueService(store, approvals);
+  const destinationAdapter = new LocalDestinationAdapter(
+    store,
+    destinations,
+    new ServerSideCredentialBroker(options.destinationCredentials),
+  );
+  const resources = new ProtectedResourceService(store, approvals, destinationAdapter);
   const credentials = new RuntimeCredentialService();
   const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
+  const memberships = new TeamMembershipService(store);
   const gateway = new RuntimeGateway(
     new DeterministicPolicyEngine(),
     resources,
@@ -102,12 +121,14 @@ async function makeRuntimeApp(
     undefined,
     grants,
     credentials,
+    destinations,
   );
   const runtime: RuntimeApiDependencies = {
     credentials,
     approvals,
     audit,
     grants,
+    memberships,
     gateway,
     securityLab: new SecurityLabService(gateway, approvals, audit, credentials, grants),
   };
@@ -115,21 +136,257 @@ async function makeRuntimeApp(
     loadConfig({
       NODE_ENV: "test",
       APP_AUTH_TOKEN: "outer-token-for-tests",
-      AGENTGATE_SECURITY_LAB_ENABLED: options.securityLabEnabled === false ? "false" : "true",
+      NAWGATE_SECURITY_LAB_ENABLED: options.securityLabEnabled === false ? "false" : "true",
+      ...(options.dataDirectory ? { APP_DATA_DIR: options.dataDirectory } : {}),
     }),
     service,
     undefined,
     runtime,
+    options.loggerStream,
   );
   applications.push(app);
-  return { app, runtime, resources, store, grants };
+  return { app, runtime, resources, store, grants, root };
 }
 
 function runtimeHeaders(token: string) {
-  return { "x-agentgate-runtime": token };
+  return { "x-nawgate-runtime": token };
 }
 
 describe("Runtime API boundary", () => {
+  it("lists memberships and lets only a team admin add a demo user", async () => {
+    const { app } = await makeRuntimeApp();
+    const auth = { authorization: "Bearer outer-token-for-tests" };
+    const userASession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: auth,
+      payload: { userId: "user-a" },
+    });
+    const userAHeaders = {
+      ...auth,
+      "x-nawgate-session": (userASession.json() as { sessionToken: string }).sessionToken,
+    };
+
+    const initial = await app.inject({
+      method: "GET",
+      url: "/api/demo/me/team-memberships",
+      headers: userAHeaders,
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      memberships: [{ teamId: "team-alpha", humanId: "user-a", role: "admin" }],
+    });
+
+    const added = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships",
+      headers: userAHeaders,
+      payload: { memberId: "user-c", teamId: "team-alpha", role: "viewer" },
+    });
+    expect(added.statusCode).toBe(201);
+    expect(added.json()).toMatchObject({
+      membership: { teamId: "team-alpha", humanId: "user-c", role: "viewer" },
+    });
+
+    const userCSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: auth,
+      payload: { userId: "user-c" },
+    });
+    const userC = await app.inject({
+      method: "GET",
+      url: "/api/demo/me/team-memberships",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userCSession.json() as { sessionToken: string }).sessionToken,
+      },
+    });
+    expect(userC.json()).toMatchObject({
+      memberships: [{ teamId: "team-alpha", humanId: "user-c", role: "viewer" }],
+    });
+
+    const removed = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships/remove",
+      headers: userAHeaders,
+      payload: { memberId: "user-c", teamId: "team-alpha" },
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json()).toMatchObject({
+      membership: { teamId: "team-alpha", humanId: "user-c", role: "viewer" },
+    });
+
+    const userCAfterRemoval = await app.inject({
+      method: "GET",
+      url: "/api/demo/me/team-memberships",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userCSession.json() as { sessionToken: string }).sessionToken,
+      },
+    });
+    expect(userCAfterRemoval.json()).toEqual({ memberships: [] });
+
+    const userBSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: auth,
+      payload: { userId: "user-b" },
+    });
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userBSession.json() as { sessionToken: string }).sessionToken,
+      },
+      payload: { memberId: "user-c", teamId: "team-alpha", role: "admin" },
+    });
+    expect(rejected.statusCode).toBe(403);
+    expect(rejected.json()).toMatchObject({ code: "TEAM_ADMIN_REQUIRED" });
+
+    const cannotRemoveLastBetaAdmin = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships/remove",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userBSession.json() as { sessionToken: string }).sessionToken,
+      },
+      payload: { memberId: "user-b", teamId: "team-beta" },
+    });
+    expect(cannotRemoveLastBetaAdmin.statusCode).toBe(409);
+    expect(cannotRemoveLastBetaAdmin.json()).toMatchObject({ code: "LAST_TEAM_ADMIN" });
+  });
+
+  it("keeps destination secret canaries out of application logs, HTTP, workspace, and receipts", async () => {
+    const canary = "DESTINATION_SECRET_CANARY_HTTP_LOG_WORKSPACE_RECEIPT";
+    const successLog = new PassThrough();
+    const successLogChunks: Buffer[] = [];
+    successLog.on("data", (chunk: Buffer) => successLogChunks.push(chunk));
+    const success = await makeRuntimeApp({
+      destinationCredentials: new Map([
+        ["credential-ref:tiktok:brand-sg", canary],
+      ]),
+      loggerStream: successLog,
+    });
+    const registeredAgent = success.store.snapshot().agents.find(
+      (agent) => agent.id === agentAId,
+    );
+    if (!registeredAgent) throw new Error("Expected registered Agent A");
+    const workspacePath = registeredAgent.workspacePath;
+    await mkdir(workspacePath, { recursive: true });
+    await writeFile(path.join(workspacePath, "AGENTS.md"), "Platform-managed workspace rules.\n", "utf8");
+
+    const session = await success.app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
+    const headers = {
+      authorization: "Bearer outer-token-for-tests",
+      "x-nawgate-session": sessionToken,
+    };
+    const runtime = success.runtime.credentials.issue(agentAId, runAId, "user-a");
+    const publish = {
+      requestId: "00000000-0000-4000-8000-000000000010",
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserA,
+      payload: {
+        purpose: "creator_requested_publish",
+        organizationId: "org-user-a",
+        businessCenterId: "business-center-user-a",
+        accountId: "account-user-a",
+        assetId: "asset-user-a-video-1",
+        contentVersion: "v1",
+      },
+    };
+    const pending = await success.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-nawgate-runtime": runtime.token },
+      payload: publish,
+    });
+    expect(pending.statusCode).toBe(202);
+    expect(pending.body).not.toContain(canary);
+    const approvalId = (pending.json() as { approvalId: string }).approvalId;
+    const approved = await success.app.inject({
+      method: "POST",
+      url: "/api/approvals/" + approvalId + "/approve",
+      headers,
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.body).not.toContain(canary);
+    const completed = await success.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-nawgate-runtime": runtime.token },
+      payload: { ...publish, approvalId },
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.body).not.toContain(canary);
+
+    const workspaceEvidence = await Promise.all(
+      (await readdir(workspacePath)).map(async (name) => readFile(path.join(workspacePath, name), "utf8")),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(workspaceEvidence.join("\n")).not.toContain(canary);
+    expect(successLogChunks.join("")).not.toContain(canary);
+    expect(JSON.stringify(success.store.snapshot())).not.toContain(canary);
+
+    const failureLog = new PassThrough();
+    const failureLogChunks: Buffer[] = [];
+    failureLog.on("data", (chunk: Buffer) => failureLogChunks.push(chunk));
+    const failure = await makeRuntimeApp({
+      destinationCredentials: new Map(),
+      loggerStream: failureLog,
+    });
+    const failureSession = await failure.app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const failureSessionToken = (failureSession.json() as { sessionToken: string }).sessionToken;
+    const failureRuntime = failure.runtime.credentials.issue(
+      agentAId,
+      "00000000-0000-4000-8000-000000000011",
+      "user-a",
+    );
+    const failurePending = await failure.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-nawgate-runtime": failureRuntime.token },
+      payload: { ...publish, requestId: "00000000-0000-4000-8000-000000000012" },
+    });
+    const failureApprovalId = (failurePending.json() as { approvalId: string }).approvalId;
+    await failure.app.inject({
+      method: "POST",
+      url: "/api/approvals/" + failureApprovalId + "/approve",
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-nawgate-session": failureSessionToken,
+      },
+    });
+    const failed = await failure.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-nawgate-runtime": failureRuntime.token },
+      payload: {
+        ...publish,
+        requestId: "00000000-0000-4000-8000-000000000012",
+        approvalId: failureApprovalId,
+      },
+    });
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).not.toContain(canary);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(failureLogChunks.join("")).not.toContain(canary);
+    expect(JSON.stringify(failure.store.snapshot())).not.toContain(canary);
+  });
+
   it("does not register Security Lab endpoints unless explicitly enabled", async () => {
     const { app } = await makeRuntimeApp({ securityLabEnabled: false });
     const session = await app.inject({
@@ -145,7 +402,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
       payload: { scenario: "own-project" },
     });
@@ -160,7 +417,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": "not-used-by-demo",
+        "x-nawgate-session": "not-used-by-demo",
       },
       payload: { scenario: "own-project" },
     });
@@ -178,7 +435,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
       payload: { scenario: "own-project" },
     });
@@ -188,7 +445,7 @@ describe("Runtime API boundary", () => {
       decision: "allow",
       reasonCode: "protected_action_succeeded",
       protectedActionExecuted: true,
-      policyVersion: "bouncer-v4",
+      policyVersion: "bouncer-v5",
     });
     expect(JSON.stringify(result.json())).not.toContain("Synthetic profile for project-a");
     expect(resources.getExecutionCount("resource.read", "project-a")).toBe(1);
@@ -198,7 +455,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
       payload: { scenario: "forged-team-admin" },
     });
@@ -222,7 +479,7 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-a" },
     });
     const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
-    const headers = { authorization: "Bearer outer-token-for-tests", "x-agentgate-session": sessionToken };
+    const headers = { authorization: "Bearer outer-token-for-tests", "x-nawgate-session": sessionToken };
     const started = await app.inject({
       method: "POST",
       url: `/api/agents/${agentAId}/security-lab`,
@@ -233,7 +490,7 @@ describe("Runtime API boundary", () => {
     const initial = started.json() as { scenarioId: string; approvalId: string; runId: string; status: string };
     expect(initial).toMatchObject({ status: "approval_required" });
     expect(initial.scenarioId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(JSON.stringify(initial)).not.toContain("x-agentgate-runtime");
+    expect(JSON.stringify(initial)).not.toContain("x-nawgate-runtime");
 
     await runtime.approvals.approve(initial.approvalId, "user-a");
     const completed = await app.inject({
@@ -262,7 +519,7 @@ describe("Runtime API boundary", () => {
     });
     const headers = {
       authorization: "Bearer outer-token-for-tests",
-      "x-agentgate-session": (session.json() as { sessionToken: string }).sessionToken,
+      "x-nawgate-session": (session.json() as { sessionToken: string }).sessionToken,
     };
     const queued = await app.inject({
       method: "POST",
@@ -305,7 +562,7 @@ describe("Runtime API boundary", () => {
       const session = await value.app.inject({
         method: "POST", url: "/api/demo/session", headers: { authorization: "Bearer outer-token-for-tests" }, payload: { userId: "user-a" },
       });
-      const headers = { authorization: "Bearer outer-token-for-tests", "x-agentgate-session": (session.json() as { sessionToken: string }).sessionToken };
+      const headers = { authorization: "Bearer outer-token-for-tests", "x-nawgate-session": (session.json() as { sessionToken: string }).sessionToken };
       const response = await value.app.inject({ method: "POST", url: `/api/agents/${agentAId}/security-lab`, headers, payload: { scenario: "alpha-restricted-jit" } });
       const body = response.json() as { scenarioId: string; approvalId: string; runId: string };
       await value.runtime.approvals.approve(body.approvalId, "user-a");
@@ -608,7 +865,7 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-a" },
     });
     const actorAToken = (actorASession.json() as { sessionToken: string }).sessionToken;
-    const actorAHeaders = { ...authHeaders, "x-agentgate-session": actorAToken };
+    const actorAHeaders = { ...authHeaders, "x-nawgate-session": actorAToken };
 
     const enrolled = await app.inject({
       method: "POST",
@@ -651,7 +908,7 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-b" },
     });
     const actorBToken = (actorBSession.json() as { sessionToken: string }).sessionToken;
-    const actorBHeaders = { ...authHeaders, "x-agentgate-session": actorBToken };
+    const actorBHeaders = { ...authHeaders, "x-nawgate-session": actorBToken };
     const crossOwner = await app.inject({
       method: "GET",
       url: `/api/agents/${agentAId}/team-grants`,
@@ -698,7 +955,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/revoke-access`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
     });
     expect(revoked.statusCode).toBe(200);
@@ -740,7 +997,7 @@ describe("Runtime API boundary", () => {
     const approvals = await app.inject({
       method: "GET",
       url: "/api/agents/" + agentId + "/approvals?status=pending",
-      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
     });
     expect(approvals.statusCode).toBe(200);
     expect(approvals.json()).toMatchObject({
@@ -750,7 +1007,7 @@ describe("Runtime API boundary", () => {
     const audit = await app.inject({
       method: "GET",
       url: "/api/agents/" + agentId + "/audit?limit=10",
-      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
     });
     expect(audit.statusCode).toBe(200);
     expect(audit.json().audit).toEqual(
@@ -758,6 +1015,10 @@ describe("Runtime API boundary", () => {
         expect.objectContaining({ eventType: "policy.approval_required" }),
       ]),
     );
+    expect(audit.json().integrity).toMatchObject({
+      status: "verified",
+      integrityVersion: "nawgate-audit-v1",
+    });
 
     const actorBSession = await app.inject({
       method: "POST",
@@ -766,10 +1027,16 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-b" },
     });
     const actorBToken = (actorBSession.json() as { sessionToken: string }).sessionToken;
+    const wrongOwnerAudit = await app.inject({
+      method: "GET",
+      url: "/api/agents/" + agentId + "/audit?limit=10",
+      headers: { ...authHeaders, "x-nawgate-session": actorBToken },
+    });
+    expect(wrongOwnerAudit.statusCode).toBe(404);
     const wrongOwner = await app.inject({
       method: "POST",
       url: "/api/approvals/" + pending.approvalId + "/approve",
-      headers: { ...authHeaders, "x-agentgate-session": actorBToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorBToken },
     });
     expect(wrongOwner.statusCode).toBe(403);
     expect(wrongOwner.json()).toMatchObject({ code: "APPROVAL_NOT_OWNED" });
@@ -784,9 +1051,238 @@ describe("Runtime API boundary", () => {
     const approved = await app.inject({
       method: "POST",
       url: "/api/approvals/" + pending.approvalId + "/approve",
-      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
     });
     expect(approved.statusCode).toBe(200);
     expect(approved.json()).toMatchObject({ approval: { status: "approved" } });
+  });
+
+  it("hides tampered audit bodies after a store and app restart", async () => {
+    const initial = await makeRuntimeApp();
+    const canary = "AUDIT_BODY_SECRET_PAYLOAD_CANARY_7f4c";
+    await initial.runtime.audit.record({
+      eventType: "policy.allow",
+      humanId: "user-a",
+      agentId: agentAId,
+      runId: runAId,
+      requestId: "9a2ed6cb-2b7f-4cd0-a2f2-0a524468f1ec",
+      action: "resource.read",
+      resourceId: "project-a",
+      decision: "allow",
+      risk: "low",
+      reasonCode: "protected_action_succeeded",
+      approvalId: null,
+      capabilityId: null,
+      status: "success",
+      durationMs: 1,
+      explanation: "Original safe evidence",
+    });
+
+    const databasePath = path.join(initial.root, "db.json");
+    const persisted = JSON.parse(await readFile(databasePath, "utf8")) as {
+      auditEvents: Array<Record<string, unknown>>;
+    };
+    persisted.auditEvents[0]!.explanation = canary;
+    persisted.auditEvents[0]!.resourceId = canary;
+    await writeFile(databasePath, JSON.stringify(persisted, null, 2) + "\n", "utf8");
+
+    const oldApplicationIndex = applications.indexOf(initial.app);
+    await initial.app.close();
+    if (oldApplicationIndex >= 0) applications.splice(oldApplicationIndex, 1);
+
+    const restartedStore = new JsonStore(databasePath);
+    await restartedStore.initialize();
+    const restartedRuntime = {
+      ...initial.runtime,
+      audit: new AuditService(restartedStore),
+    };
+    const restartedApp = await createApp(
+      loadConfig({
+        NODE_ENV: "test",
+        APP_AUTH_TOKEN: "outer-token-for-tests",
+        NAWGATE_SECURITY_LAB_ENABLED: "true",
+      }),
+      service,
+      undefined,
+      restartedRuntime,
+    );
+    applications.push(restartedApp);
+
+    const authHeaders = { authorization: "Bearer outer-token-for-tests" };
+    const ownerSession = await restartedApp.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-a" },
+    });
+    const ownerToken = (ownerSession.json() as { sessionToken: string }).sessionToken;
+    const ownerAudit = await restartedApp.inject({
+      method: "GET",
+      url: `/api/agents/${agentAId}/audit?limit=10`,
+      headers: { ...authHeaders, "x-nawgate-session": ownerToken },
+    });
+    expect(ownerAudit.statusCode).toBe(200);
+    const ownerBody = ownerAudit.json() as {
+      audit: unknown[];
+      integrity: { status: string };
+    };
+    expect(ownerBody).toMatchObject({ audit: [], integrity: { status: "broken" } });
+    expect(Object.keys(ownerBody).sort()).toEqual(["audit", "integrity"]);
+    expect(JSON.stringify(ownerBody)).not.toContain(canary);
+
+    const otherSession = await restartedApp.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-b" },
+    });
+    const otherToken = (otherSession.json() as { sessionToken: string }).sessionToken;
+    const otherAudit = await restartedApp.inject({
+      method: "GET",
+      url: `/api/agents/${agentAId}/audit?limit=10`,
+      headers: { ...authHeaders, "x-nawgate-session": otherToken },
+    });
+    expect(otherAudit.statusCode).toBe(404);
+    expect(otherAudit.body).not.toContain(canary);
+  });
+
+  it("blocks replay bodies before reading them when audit integrity is broken", async () => {
+    const replayDirectory = await mkdtemp(path.join(tmpdir(), "nawgate-replay-integrity-test-"));
+    temporaryDirectories.push(replayDirectory);
+    const { app, runtime, root } = await makeRuntimeApp({ dataDirectory: replayDirectory });
+    const canary = "REPLAY_AUDIT_SECRET_PAYLOAD_CANARY_8a5d";
+    const event = await runtime.audit.record({
+      eventType: "policy.allow",
+      humanId: "user-a",
+      agentId: agentAId,
+      runId: runAId,
+      requestId: "8e73c8a4-4b8e-4bf7-bf49-64407f331146",
+      action: "resource.read",
+      resourceId: "project-a",
+      decision: "allow",
+      risk: "low",
+      reasonCode: "protected_action_succeeded",
+      approvalId: null,
+      capabilityId: null,
+      status: "success",
+      durationMs: 1,
+      explanation: "Original safe evidence",
+    });
+    const { recordFlightData } = await import("./nawgate/flight-recorder.js");
+    await recordFlightData({
+      runId: runAId,
+      agentId: agentAId,
+      ownerUserId: "user-a",
+      prompt: "Safe prompt",
+      output: "Safe output",
+      error: null,
+      status: "completed",
+      usage: null,
+      startedAt: "2026-08-30T10:00:00.000Z",
+      completedAt: "2026-08-30T10:00:01.000Z",
+      durationMs: 1000,
+      auditEvents: [{ ...event, explanation: canary, resourceId: canary }],
+    }, replayDirectory);
+
+    const databasePath = path.join(root, "db.json");
+    const persisted = JSON.parse(await readFile(databasePath, "utf8")) as {
+      auditEvents: Array<Record<string, unknown>>;
+    };
+    persisted.auditEvents[0]!.explanation = canary;
+    persisted.auditEvents[0]!.resourceId = canary;
+    await writeFile(databasePath, JSON.stringify(persisted, null, 2) + "\n", "utf8");
+
+    const ownerSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const ownerToken = (ownerSession.json() as { sessionToken: string }).sessionToken;
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentAId}/replays/${runAId}`,
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-nawgate-session": ownerToken,
+      },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      code: "AUDIT_INTEGRITY_BROKEN",
+      integrity: { status: "broken" },
+    });
+    expect(response.body).not.toContain(canary);
+  });
+
+  it("serves flight replay data to agent owner and denies unauthorized principals", async () => {
+    const { app } = await makeRuntimeApp();
+    const authHeaders = { authorization: "Bearer outer-token-for-tests" };
+    const agentId = "00000000-0000-4000-8000-000000000001";
+    const runId = "00000000-0000-4000-8000-000000000002";
+
+    const actorASession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-a" },
+    });
+    const actorAToken = (actorASession.json() as { sessionToken: string }).sessionToken;
+
+    const actorBSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: authHeaders,
+      payload: { userId: "user-b" },
+    });
+    const actorBToken = (actorBSession.json() as { sessionToken: string }).sessionToken;
+
+    // Record flight data for this agent & run
+    const { recordFlightData } = await import("./nawgate/flight-recorder.js");
+    const { dataDirectory } = loadConfig({ NODE_ENV: "test" });
+    await recordFlightData(
+      {
+        runId,
+        agentId,
+        ownerUserId: "user-a",
+        prompt: "Check status with key sk-123456789012345678901234",
+        output: "All systems healthy.",
+        error: null,
+        status: "completed",
+        usage: { inputTokens: 15, outputTokens: 8 },
+        startedAt: "2026-08-30T10:00:00.000Z",
+        completedAt: "2026-08-30T10:00:01.200Z",
+        durationMs: 1200,
+        auditEvents: [],
+      },
+      dataDirectory,
+    );
+
+    // User A (Owner) fetches replay
+    const ownerFetch = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}/replays/${runId}`,
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
+    });
+    expect(ownerFetch.statusCode).toBe(200);
+    const replay = (ownerFetch.json() as { replay: { runId: string; prompt: string } }).replay;
+    expect(replay.runId).toBe(runId);
+    expect(replay.prompt).toBe("Check status with key [REDACTED_OPENAI_KEY]");
+
+    // User B (Unauthorized) attempts to fetch replay
+    const unauthorizedFetch = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}/replays/${runId}`,
+      headers: { ...authHeaders, "x-nawgate-session": actorBToken },
+    });
+    expect(unauthorizedFetch.statusCode).toBe(404);
+
+    // Non-existent replay
+    const missingFetch = await app.inject({
+      method: "GET",
+      url: `/api/agents/${agentId}/replays/00000000-0000-4000-8000-000000000099`,
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
+    });
+    expect(missingFetch.statusCode).toBe(404);
   });
 });

@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates v1 data to v4 and seeds team relationships without grants", async () => {
+  it("migrates v1 data to v8 and seeds team relationships without grants", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -47,7 +47,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(4);
+    expect(database.version).toBe(8);
     expect(database.agentTeamGrants).toEqual([]);
     expect(database.agents[0]?.ownerUserId).toBe("user-a");
     expect(database.protectedResources.map((resource) => resource.id)).toEqual([
@@ -58,18 +58,33 @@ describe("JsonStore", () => {
       "team-alpha-internal",
       "team-alpha-restricted",
       "team-beta-internal",
+      "asset-user-a-video-1",
+      "asset-user-a-video-2",
+      "asset-user-b-video-1",
     ]);
     expect(database.deploymentStates.map((state) => state.resourceId)).toEqual([
       "staging",
       "production",
     ]);
+    expect(database.registeredDestinations.map((destination) => destination.id)).toEqual([
+      "tiktok-account:brand-sg",
+      "tiktok-account:creator-demo",
+      "analytics:approved-dashboard",
+      "archive:compliance-store",
+    ]);
+    expect(database.destinationReceipts).toEqual([]);
+    expect(database.approvalAuthorities.map((authority) => authority.id)).toEqual([
+      "approval-authority:user-a:owner",
+      "approval-authority:user-c:org-a-reviewer",
+      "approval-authority:user-b:owner",
+    ]);
     expect(database.teamMemberships).toEqual([
       { teamId: "team-alpha", humanId: "user-a", role: "admin" },
       { teamId: "team-alpha", humanId: "user-b", role: "viewer" },
-      { teamId: "team-beta", humanId: "user-b", role: "editor" },
+      { teamId: "team-beta", humanId: "user-b", role: "admin" },
     ]);
     expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
-      version: 4,
+      version: 8,
       agentTeamGrants: [],
     });
   });
@@ -93,7 +108,7 @@ describe("JsonStore", () => {
     const store = new JsonStore(filePath);
     await store.initialize();
 
-    expect(store.snapshot().version).toBe(4);
+    expect(store.snapshot().version).toBe(8);
     expect(store.snapshot().agentTeamGrants).toEqual([]);
     expect(store.snapshot().teamMemberships).toHaveLength(3);
     expect(store.snapshot().protectedResources).toEqual(
@@ -103,7 +118,41 @@ describe("JsonStore", () => {
     );
   });
 
-  it("migrates v3 relationships to v4 without silently enrolling Agents", async () => {
+  it("upgrades the original User B Team Beta editor fixture to admin", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-beta-admin-test-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(filePath, JSON.stringify({
+      version: 7,
+      agents: [],
+      messages: [],
+      runs: [],
+      approvals: [],
+      auditEvents: [],
+      protectedResources: [],
+      deploymentStates: [],
+      actionExecutions: [],
+      teamMemberships: [
+        { teamId: "team-beta", humanId: "user-b", role: "editor" },
+      ],
+      agentTeamGrants: [],
+      capabilityClaims: [],
+      registeredDestinations: [],
+      destinationReceipts: [],
+      approvalAuthorities: [],
+    }), "utf8");
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot().teamMemberships).toEqual(
+      expect.arrayContaining([
+        { teamId: "team-beta", humanId: "user-b", role: "admin" },
+      ]),
+    );
+  });
+
+  it("migrates v3 relationships to v8 without silently enrolling Agents", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v3-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -149,7 +198,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(4);
+    expect(database.version).toBe(8);
     expect(database.agentTeamGrants).toEqual([]);
     expect(database.teamMemberships).toEqual(
       expect.arrayContaining([
@@ -204,6 +253,105 @@ describe("JsonStore", () => {
     });
     database.agentTeamGrants.push({ ...grant, id: "grant-duplicate" });
     expect(() => migrateDatabase(database)).toThrow("Unsupported database format");
+  });
+
+  it("rejects malformed v6 destination metadata and side-effect receipts", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-destination-validation-test-"));
+    temporaryDirectories.push(root);
+    const store = new JsonStore(path.join(root, "db.json"));
+    await store.initialize();
+    const baseline = store.snapshot();
+
+    const badClassification = structuredClone(baseline);
+    badClassification.registeredDestinations[0]!.classification = "confidential" as never;
+    expect(() => migrateDatabase(badClassification)).toThrow("Unsupported database format");
+
+    const badEnvironment = structuredClone(baseline);
+    badEnvironment.registeredDestinations[0]!.environment = "remote" as never;
+    expect(() => migrateDatabase(badEnvironment)).toThrow("Unsupported database format");
+
+    const badAudience = structuredClone(baseline);
+    badAudience.registeredDestinations[0]!.audience = "public" as never;
+    expect(() => migrateDatabase(badAudience)).toThrow("Unsupported database format");
+
+    const missingRiskMetadata = structuredClone(baseline);
+    const contentAsset = missingRiskMetadata.protectedResources.find(
+      (resource) => resource.type === "content_asset",
+    );
+    if (!contentAsset || contentAsset.type !== "content_asset") throw new Error("Expected content asset");
+    delete (contentAsset as { assetType?: unknown }).assetType;
+    expect(() => migrateDatabase(missingRiskMetadata)).toThrow("Unsupported database format");
+
+    const badReceipt = structuredClone(baseline);
+    badReceipt.destinationReceipts.push({
+      id: "receipt-invalid",
+      destinationId: "tiktok-account:brand-sg",
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      purpose: "creator_requested_publish",
+      httpMethod: "POST",
+      httpsHost: "tiktok.local.test",
+      httpsPath: "/v1/accounts/account-user-a/content/asset-user-a-video-1",
+      environment: "local",
+      destinationRevision: 1,
+      resourceRevision: 1,
+      credentialRef: "credential-ref:tiktok:brand-sg",
+      createdAt: "not-a-date",
+    });
+    expect(() => migrateDatabase(badReceipt)).toThrow("Unsupported database format");
+  });
+
+  it("strips unknown credential-bearing fields during v6 persistence migration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-secret-migration-test-"));
+    temporaryDirectories.push(root);
+    const store = new JsonStore(path.join(root, "db.json"));
+    await store.initialize();
+    const contaminated = store.snapshot();
+    const canary = "DESTINATION_SECRET_CANARY_MIGRATION_ONLY";
+    Object.assign(contaminated, { rawCredential: canary });
+    contaminated.auditEvents.push({
+      id: "audit-secret-migration",
+      eventType: "policy.deny",
+      createdAt: "2026-08-30T00:00:00.000Z",
+      humanId: "user-a",
+      agentId: "agent-a",
+      runId: "run-a",
+      requestId: "request-a",
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      decision: "deny",
+      risk: "high",
+      reasonCode: "invalid_context",
+      approvalId: null,
+      capabilityId: null,
+      status: "failure",
+      durationMs: 1,
+      policyVersion: "bouncer-v4",
+      explanation: "safe",
+      enforcementPoint: "RuntimeGateway",
+      protectedActionExecuted: false,
+      credential: canary,
+    } as never);
+    contaminated.actionExecutions.push({
+      runId: "run-a",
+      requestId: "request-execution-secret",
+      action: "deploy.staging",
+      resourceId: "staging",
+      payloadDigest: null,
+      destination: null,
+      policyRevision: "bouncer-v4",
+      resourceRevision: 1,
+      destinationRevision: null,
+      status: "succeeded",
+      resultSummary: { summary: "safe", credential: canary },
+      completedAt: "2026-08-30T00:00:00.000Z",
+      credential: canary,
+    } as never);
+
+    const migrated = migrateDatabase(contaminated);
+    expect(JSON.stringify(migrated)).not.toContain(canary);
+    expect(migrated.auditEvents.at(-1)).not.toHaveProperty("credential");
+    expect(migrated.actionExecutions.at(-1)?.resultSummary).toEqual({ summary: "safe" });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {

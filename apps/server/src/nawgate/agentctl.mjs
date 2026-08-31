@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+
+import { randomUUID } from "node:crypto";
+
+const gatewayUrl = process.env.NAWGATE_GATEWAY_URL?.trim();
+const runtimeToken = process.env.NAWGATE_RUNTIME_TOKEN?.trim();
+const configuredWait = Number.parseInt(
+  process.env.NAWGATE_APPROVAL_WAIT_MS ?? "90000",
+  10,
+);
+const maxWaitMs = Number.isFinite(configuredWait) && configuredWait > 0
+  ? configuredWait
+  : 90_000;
+
+const contentAssets = {
+  "asset-user-a-video-1": {
+    organizationId: "org-user-a",
+    businessCenterId: "business-center-user-a",
+    accountId: "account-user-a",
+  },
+  "asset-user-a-video-2": {
+    organizationId: "org-user-a",
+    businessCenterId: "business-center-user-a",
+    accountId: "account-user-a",
+  },
+  "asset-user-b-video-1": {
+    organizationId: "org-user-b",
+    businessCenterId: "business-center-user-b",
+    accountId: "account-user-b",
+  },
+};
+
+const contentCommands = {
+  moderate: { action: "content.moderate", purpose: "safety_moderation", destination: null },
+  disclose: { action: "content.disclose", purpose: "approved_analytics", destinationFor: "analytics" },
+  publish: { action: "content.publish", purpose: "creator_requested_publish", destinationFor: "publish" },
+  export: { action: "content.export", purpose: "compliance_archive", destinationFor: "archive" },
+};
+
+const contentDestinations = {
+  analytics: "analytics:approved-dashboard",
+  publishUserA: "tiktok-account:brand-sg",
+  publishUserB: "tiktok-account:creator-demo",
+  archive: "archive:compliance-store",
+};
+
+function usage() {
+  process.stderr.write(
+    "Usage: agentctl resource read <resource-id> | agentctl file read <resource-id> | agentctl deploy <staging|production> | agentctl content <moderate|disclose|publish|export> <asset-id>\n",
+  );
+}
+
+function fail(message) {
+  process.stderr.write("NawGate: " + message + "\n");
+  process.exitCode = 1;
+}
+
+function parseCommand(args) {
+  if (args.length === 3 && args[0] === "resource" && args[1] === "read") {
+    return { action: "resource.read", resourceId: args[2], label: "resource.read " + args[2] };
+  }
+  if (args.length === 3 && args[0] === "file" && args[1] === "read") {
+    return { action: "file.read", resourceId: args[2], label: "file.read " + args[2] };
+  }
+  if (args.length === 2 && args[0] === "deploy" && args[1] === "staging") {
+    return { action: "deploy.staging", resourceId: "staging", label: "deploy.staging" };
+  }
+  if (args.length === 2 && args[0] === "deploy" && args[1] === "production") {
+    return {
+      action: "deploy.production",
+      resourceId: "production",
+      label: "deploy.production",
+    };
+  }
+  if (args.length === 3 && args[0] === "content") {
+    const definition = Object.hasOwn(contentCommands, args[1])
+      ? contentCommands[args[1]]
+      : null;
+    const asset = Object.hasOwn(contentAssets, args[2])
+      ? contentAssets[args[2]]
+      : null;
+    if (!definition || !asset) return null;
+    let destination;
+    if (definition.destinationFor === "analytics") {
+      destination = asset.accountId === "account-user-a"
+        ? contentDestinations.analytics
+        : null;
+    } else if (definition.destinationFor === "publish") {
+      destination = asset.accountId === "account-user-a"
+        ? contentDestinations.publishUserA
+        : contentDestinations.publishUserB;
+    } else if (definition.destinationFor === "archive") {
+      destination = asset.organizationId === "org-user-a"
+        ? contentDestinations.archive
+        : null;
+    }
+    return {
+      action: definition.action,
+      resourceId: args[2],
+      payload: {
+        purpose: definition.purpose,
+        organizationId: asset.organizationId,
+        businessCenterId: asset.businessCenterId,
+        accountId: asset.accountId,
+        assetId: args[2],
+        contentVersion: "v1",
+      },
+      ...(destination ? { destination } : {}),
+      label: definition.action + " " + args[2],
+    };
+  }
+  return null;
+}
+
+function asObject(value) {
+  return typeof value === "object" && value !== null ? value : {};
+}
+
+async function request(pathname, body) {
+  const response = await fetch(new URL(pathname, gatewayUrl), {
+    method: body ? "POST" : "GET",
+    headers: {
+      "X-NawGate-Runtime": runtimeToken,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    signal: AbortSignal.timeout(10_000),
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  return { status: response.status, payload: asObject(payload) };
+}
+
+function failureFor(payload, fallback) {
+  const code = typeof payload.code === "string" ? payload.code : "";
+  if (code === "APPROVAL_EXPIRED") return "Approval expired.";
+  if (code === "APPROVAL_DENIED") return "The protected action was not permitted.";
+  if (code === "INVALID_RUNTIME_CREDENTIAL" || code === "RUNTIME_CREDENTIAL_EXPIRED") {
+    return "The Agent runtime credential is no longer valid.";
+  }
+  if (code === "IDEMPOTENCY_MISMATCH") return "The protected request could not be retried safely.";
+  if (code === "ACTION_NOT_PERMITTED") return "The protected action was not permitted.";
+  return fallback;
+}
+
+function printSuccess(command, payload, approval) {
+  process.stdout.write(
+    approval
+      ? "NawGate: owner approved once -> ALLOW\n"
+      : "NawGate: " + command.label + " -> ALLOW\n",
+  );
+  const result = asObject(payload.result);
+  const detail = typeof result.content === "string"
+    ? result.content
+    : typeof result.summary === "string"
+      ? result.summary
+      : command.action === "deploy.production" || command.action === "deploy.staging"
+        ? "Deployment completed."
+        : "Protected action completed.";
+  process.stdout.write(detail + "\n");
+}
+
+function actionBody(command, requestId, approvalId) {
+  return {
+    requestId,
+    action: command.action,
+    resourceId: command.resourceId,
+    ...(command.payload !== undefined ? { payload: command.payload } : {}),
+    ...(command.destination !== undefined ? { destination: command.destination } : {}),
+    ...(approvalId ? { approvalId } : {}),
+  };
+}
+
+async function waitForApproval(command, requestId, approvalId) {
+  process.stdout.write("Waiting for owner approval...\n");
+  const deadline = Date.now() + maxWaitMs;
+  let pollAfterMs = 1_000;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollAfterMs, remaining)));
+    const response = await request("/api/runtime/approvals/" + approvalId);
+    if (response.status !== 200) {
+      fail(failureFor(response.payload, "Approval status could not be read."));
+      return;
+    }
+    if (response.payload.status === "pending") {
+      const next = Number(response.payload.pollAfterMs);
+      pollAfterMs = Number.isFinite(next) && next > 0
+        ? Math.max(100, Math.min(next, 1_000))
+        : 1_000;
+      continue;
+    }
+    if (response.payload.status === "denied" || response.payload.status === "expired") {
+      fail(failureFor(response.payload, "The protected action was not permitted."));
+      return;
+    }
+    if (response.payload.status !== "approved") {
+      fail("Approval status was not recognized.");
+      return;
+    }
+    const retried = await request("/api/runtime/actions", actionBody(command, requestId, approvalId));
+    if (retried.status !== 200 || retried.payload.status !== "success") {
+      fail(failureFor(retried.payload, "The approved protected action failed."));
+      return;
+    }
+    printSuccess(command, retried.payload, true);
+    return;
+  }
+  fail("Timed out waiting for owner approval.");
+}
+
+async function main() {
+  const command = parseCommand(process.argv.slice(2));
+  if (!command) {
+    usage();
+    fail("Invalid command.");
+    return;
+  }
+  if (!gatewayUrl || !runtimeToken) {
+    fail("Agent runtime is not configured for protected actions.");
+    return;
+  }
+  const requestId = randomUUID();
+  let response;
+  try {
+    response = await request("/api/runtime/actions", actionBody(command, requestId));
+  } catch {
+    fail("NawGate is unavailable.");
+    return;
+  }
+  if (response.status === 200 && response.payload.status === "success") {
+    printSuccess(command, response.payload, false);
+    return;
+  }
+  if (response.status === 202 && response.payload.status === "approval_required") {
+    const approvalId = response.payload.approvalId;
+    if (typeof approvalId !== "string" || !approvalId) {
+      fail("Approval request was malformed.");
+      return;
+    }
+    await waitForApproval(command, requestId, approvalId);
+    return;
+  }
+  fail(failureFor(response.payload, "The protected action was not permitted."));
+}
+
+await main().catch(() => fail("NawGate is unavailable."));

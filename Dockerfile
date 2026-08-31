@@ -36,7 +36,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/server/package.json ./apps/server/package.json
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
-COPY apps/server/src/agentgate/agentctl.mjs /usr/local/bin/agentctl
+COPY apps/server/src/nawgate/agentctl.mjs /usr/local/bin/agentctl
 
 RUN mkdir -p /app/data /app/workspaces /app/codex-home \
     && chmod 0755 /usr/local/bin/agentctl \

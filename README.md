@@ -1,10 +1,10 @@
 # Volc Agent Launchpad
 
 A minimal Agent platform for three-day middleware hackathons. It provides Agent
-CRUD, a browser Playground, persistent workspaces, and **AgentGate**:
+CRUD, a browser Playground, persistent workspaces, and **NawGate**:
 backend-enforced delegated identity and authorization for autonomous Agents.
 
-AgentGate separates Human, Agent, and Run authority. A human's permission does
+NawGate separates Human, Agent, and Run authority. A human's permission does
 not automatically become an Agent's permission: persistent Agent grants are
 narrow, every Run has temporary identity, and each registered protected action
 is evaluated at a trusted backend gateway.
@@ -13,7 +13,7 @@ Run it locally with Docker, Colima, or rootless Podman, or deploy it to
 Volcengine ECS.
 
 > [!WARNING]
-> This is a proof of concept. AgentGate protects only registered actions routed
+> This is a proof of concept. NawGate protects only registered actions routed
 > through `agentctl`; it does not intercept every internal Codex shell or file
 > operation. Do not use production data or credentials. See [SECURITY.md](SECURITY.md).
 
@@ -33,18 +33,26 @@ Volcengine ECS.
 - Agent create, edit, start, stop, delete, and multi-turn chat
 - Fastify control plane with asynchronous Run state
 - Persistent Agent workspaces and Codex sessions
-- AgentGate identity, ownership, approval, one-use capability, and redacted audit evidence
+- NawGate identity, ownership, approval, one-use capability, and redacted audit evidence
 - Human != Agent != Run separation with backend-owned Agent ownership and
   short-lived trusted Runtime identity per Run
 - Team memberships plus persistent Team Agent grants with independent viewer,
   editor, and admin roles, action scope, optional expiry, bundle evidence, and
   explicit grant revocation
-- `bouncer-v4` deterministic policy with cross-user/cross-team hard deny,
+- `bouncer-v5` deterministic policy plus `risk-v1` tiers and optional
+  owner/independent-reviewer dual control, with cross-user/cross-team hard deny,
   trusted server-side attribute resolution, replay/idempotency protection, and
   final pre-side-effect authorization rechecks
-- Owner approval for high-risk production deploys and exact one-use JIT
+- Owner approval for medium/high actions, critical two-person approval, and exact one-use JIT
   elevation for restricted team-file reads; JIT never mutates the Agent's
   persistent viewer grant
+- Purpose-bound synthetic content actions for moderation, scoped disclosure,
+  owner-approved publishing, and owner-approved compliance export across a
+  deterministic organisation/business-centre/account/asset hierarchy
+- Server-owned destination catalogue with stable account/analytics/archive IDs,
+  action/purpose/tenant/classification/revision checks, and a server-side
+  synthetic credential broker feeding only a local fake adapter with safe
+  receipts; arbitrary URLs and credentials are rejected
 - Redacted audit timeline and Delegation Receipt with policy version, reason,
   enforcement point, safe authority evidence, and side-effect status
 - Local/demo-only Security Lab that exercises the real RuntimeGateway for
@@ -55,7 +63,7 @@ Volcengine ECS.
 
 ## Selected middleware track: Bouncer
 
-AgentGate demonstrates backend-enforced delegated access. A Run gets a scoped
+NawGate demonstrates backend-enforced delegated access. A Run gets a scoped
 short-lived identity, the Bouncer checks the backend-owned human/Agent/resource
 relationship, and only the RuntimeGateway can invoke a registered protected
 action. User A can read `project-a`; User B's resource is denied. Production
@@ -66,19 +74,19 @@ enroll an owned Agent with a narrow file-read role. Human membership, Agent
 grant, Run identity, and resource threshold must all agree; a viewer grant can
 request restricted access only through explicit one-use owner approval. The
 Runtime cannot assert any of them. See the
-[AgentGate overview](docs/agentgate/overview.md),
-[standards alignment](docs/agentgate/standards.md), and
-[three-minute demo](docs/agentgate/demo.md).
+[NawGate overview](docs/nawgate/overview.md),
+[standards alignment](docs/nawgate/standards.md), and
+[three-minute demo](docs/nawgate/demo.md).
 
 ## Architecture
 
-AgentGate separates Human, Agent, and Run authority and enforces registered
+NawGate separates Human, Agent, and Run authority and enforces registered
 protected actions through a trusted backend authorization boundary.
 
-[![AgentGate architecture](docs/agentgate/architecture-share.png)](https://cloudkai.github.io/CodeJam/agentgate/architecture.html)
+[![NawGate architecture](docs/nawgate/architecture-share.png)](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
 
-Explore the [interactive AgentGate architecture](https://cloudkai.github.io/CodeJam/docs/agentgate/architecture.html)
-or read the [GitHub-friendly architecture overview](docs/agentgate/architecture.md).
+Explore the [interactive NawGate architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
+or read the [GitHub-friendly architecture overview](docs/nawgate/architecture.md).
 
 ## Requirements
 
@@ -88,7 +96,10 @@ or read the [GitHub-friendly architecture overview](docs/agentgate/architecture.
 - Either a Volcengine Ark credential or an OpenAI-compatible Responses API
   credential and model
 
-Codex CLI is included in the Runtime image and is not required on the host.
+Codex CLI is included in the Runtime image and is not required on the host when
+using `npm run poc` with the container Runtime. The default `npm run dev`
+configuration uses the local-process Runtime and therefore requires a host
+Codex executable configured through `CODEX_BIN`.
 
 ## Local browser SOP
 
@@ -144,7 +155,7 @@ script automatically selects Docker, Colima, or Podman.
 
 ### 4. Open the browser
 
-Visit <http://localhost:3000>, or open it from the terminal:
+Visit [http://localhost:3000](http://localhost:3000), or open it from the terminal:
 
 ```bash
 open http://localhost:3000       # macOS
@@ -165,7 +176,7 @@ In the Web UI:
 The Agent can write files, run commands, and continue the same Codex session in
 later messages.
 
-Protected AgentGate actions use the installed `agentctl` command. The official
+Protected NawGate actions use the installed `agentctl` command. The official
 `npm run poc` container installs it automatically. Protected-action credentials
 are intentionally not injected into `local-process` Runs because the Agent and
 server child process share a filesystem there; use the disposable container
@@ -176,7 +187,7 @@ The Web UI also exposes a **Delegation receipt** for the latest approval and a
 **Revoke access** control while a Run is active. For User A's Team Alpha admin
 fixture, it also exposes persistent Agent enrollment and revocation. These
 controls show safe metadata and status only; they do not expose credentials or
-protected payloads. When `AGENTGATE_SECURITY_LAB_ENABLED=true`, the side panel
+protected payloads. When `NAWGATE_SECURITY_LAB_ENABLED=true`, the side panel
 also exposes real-gateway checks for allow, cross-user/cross-team deny, JIT
 approval and replay denial, forged trusted-field rejection, Run/grant
 revocation, and a queued initial-allow → revoke → final-recheck denial. The
@@ -238,7 +249,7 @@ Start the application:
 docker compose up --build
 ```
 
-Open <http://localhost:3000>. Stop it without deleting Agent data:
+Open [http://localhost:3000](http://localhost:3000). Stop it without deleting Agent data:
 
 ```bash
 docker compose down
@@ -249,20 +260,70 @@ docker compose down
 ```bash
 npm install
 cp .env.example .env
-npm install --global @openai/codex@0.111.0
-npm run dev
 ```
 
-- Web UI: <http://localhost:5173>
-- API: <http://localhost:3000>
+- Web UI: [http://localhost:5173](http://localhost:5173)
+- API: [http://localhost:3000](http://localhost:3000)
 
 Use local paths in `.env` when running outside Docker:
 
 ```dotenv
-APP_DATA_DIR=.data
-AGENT_WORKSPACE_ROOT=workspaces
-CODEX_HOME=codex-home
+APP_DATA_DIR=.local/data
+AGENT_WORKSPACE_ROOT=.local/workspaces
+CODEX_HOME=.local/codex-home
+NAWGATE_GATEWAY_URL=http://127.0.0.1:3000
 ```
+
+### Local-process setup on macOS and Linux
+
+Local development requires Node.js 22+ and a host Codex executable. Confirm the
+Node version in the same terminal that will run the server:
+
+```bash
+node --version
+```
+
+If Homebrew installed Node.js 22 on macOS, select it with:
+
+```bash
+export PATH="$(brew --prefix node@22)/bin:$PATH"
+hash -r
+node --version
+```
+
+The ChatGPT macOS application includes a Codex executable. Configure its
+absolute path before starting local development:
+
+```bash
+export CODEX_BIN="/Applications/ChatGPT.app/Contents/Resources/codex"
+"$CODEX_BIN" --version
+npm run dev
+```
+
+On Linux, install Codex CLI if it is not already available, then resolve its
+absolute path:
+
+```bash
+npm install --global @openai/codex@0.111.0
+export CODEX_BIN="$(command -v codex)"
+"$CODEX_BIN" --version
+npm run dev
+```
+
+To persist the executable selection, put the resolved absolute path in `.env`:
+
+```dotenv
+# macOS with the ChatGPT application
+CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
+
+# Linux example; replace this with the output of `command -v codex`
+# CODEX_BIN=/usr/local/bin/codex
+```
+
+If a Run fails with `spawn codex ENOENT`, the server cannot locate the Codex
+executable. Set `CODEX_BIN` to an existing absolute path, restart `npm run dev`,
+and verify that `"$CODEX_BIN" --version` succeeds in that terminal. This error
+is unrelated to the selected model provider or API key.
 
 ## Deployment
 
@@ -287,25 +348,32 @@ cp deploy/volcengine/terraform.tfvars.example \
 
 ## Configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MODEL_PROVIDER` | `ark` | `ark` or `openai-compatible`. |
-| `ARK_API_KEY` | Required for Ark | Ark model API key. |
-| `ARK_MODEL` | Required for Ark | Responses-capable endpoint or model ID. |
-| `ARK_BASE_URL` | Beijing v3 endpoint | Ark OpenAI-compatible API URL. |
-| `OPENAI_API_KEY` | Required for OpenAI-compatible | OpenAI or compatible provider API key. |
-| `OPENAI_MODEL` | Required for OpenAI-compatible | Responses-capable model ID. |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible Responses API URL. |
-| `APP_AUTH_TOKEN` | Empty on loopback | Shared demo token; use 24+ random characters remotely. |
-| `RUNTIME_PROVIDER` | `local-process` | `container` for disposable local Runtime containers. |
-| `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |
-| `CODEX_TIMEOUT_MS` | `600000` | Maximum duration of one turn. |
-| `AGENTGATE_GATEWAY_URL` | `http://127.0.0.1:<PORT>` | Runtime gateway URL injected into each Run. |
-| `AGENTGATE_APPROVAL_WAIT_MS` | `90000` | Maximum time `agentctl` waits for owner approval. |
-| `AGENTGATE_SECURITY_LAB_ENABLED` | `false` | Enables the redacted local/demo Security Lab. |
-| `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
+| Variable                         | Default                        | Purpose                                                |
+| -------------------------------- | ------------------------------ | ------------------------------------------------------ |
+| `MODEL_PROVIDER`               | `ark`                        | `ark` or `openai-compatible`.                      |
+| `ARK_API_KEY`                  | Required for Ark               | Ark model API key.                                     |
+| `ARK_MODEL`                    | Required for Ark               | Responses-capable endpoint or model ID.                |
+| `ARK_BASE_URL`                 | Beijing v3 endpoint            | Ark OpenAI-compatible API URL.                         |
+| `OPENAI_API_KEY`               | Required for OpenAI-compatible | OpenAI or compatible provider API key.                 |
+| `OPENAI_MODEL`                 | Required for OpenAI-compatible | Responses-capable model ID.                            |
+| `OPENAI_BASE_URL`              | `https://api.openai.com/v1`  | OpenAI-compatible Responses API URL.                   |
+| `APP_AUTH_TOKEN`               | Empty on loopback              | Shared demo token; use 24+ random characters remotely. |
+| `RUNTIME_PROVIDER`             | `local-process`              | `container` for disposable local Runtime containers. |
+| `CODEX_BIN`                    | `codex`                      | Host Codex executable name or absolute path.           |
+| `CODEX_SANDBOX_MODE`           | `workspace-write`            | Codex inner sandbox mode.                              |
+| `CODEX_TIMEOUT_MS`             | `600000`                     | Maximum duration of one turn.                          |
+| `NAWGATE_GATEWAY_URL`          | `http://127.0.0.1:<PORT>`    | Runtime gateway URL injected into each Run.            |
+| `NAWGATE_APPROVAL_WAIT_MS`     | `90000`                      | Maximum time`agentctl` waits for owner approval.     |
+| `NAWGATE_SECURITY_LAB_ENABLED` | `false`                      | Enables the redacted local/demo Security Lab.          |
+| `LOCAL_POC_DATA_ROOT`          | Platform-specific              | Local metadata, workspace, and session directory.      |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.
+
+The NawGate product rename is a breaking integration change: replace any
+existing `AGENTGATE_*` environment variables with their `NAWGATE_*` names.
+This checkout has no `/api/agentgate` route or compatibility alias; protected
+runtime requests continue through `/api/runtime/...` with `X-NawGate-*`
+headers.
 
 ## How it works
 
@@ -324,12 +392,12 @@ The first turn uses `codex exec`; later turns resume the stored Codex thread.
 Deleting an Agent archives its workspace under `workspaces/.deleted/`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
-boundaries. For AgentGate's current trust boundaries and policy semantics, use
-the [interactive architecture](docs/agentgate/architecture.html).
+boundaries. For NawGate's current trust boundaries and policy semantics, use
+the [interactive architecture](docs/nawgate/architecture.html).
 
-## AgentGate scope and limitations
+## NawGate scope and limitations
 
-AgentGate currently protects registered protected actions routed through
+NawGate currently protects registered protected actions routed through
 `agentctl` and `RuntimeGateway`. It does not intercept every Codex shell
 command, arbitrary local filesystem operation, or arbitrary network request.
 This is a single-process hackathon POC: it does not replace enterprise IAM,
@@ -339,6 +407,11 @@ multi-Agent coordination, or hardened multi-tenant container isolation.
 Protected payloads are intentionally outside Agent workspaces, audit storage,
 and Delegation Receipts. The raw short-lived runtime credential is never shown
 in the Web UI, receipt, audit, or Security Lab result.
+
+Content destination receipts contain only safe route metadata, destination and
+resource revisions, and credential references. The local adapter makes no
+external call and does not claim network isolation; destination revision or
+revocation invalidates pending and approved claims.
 
 ## Validation
 
@@ -357,10 +430,10 @@ container engine completed it successfully.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [AgentGate architecture (interactive)](docs/agentgate/architecture.html)
-- [AgentGate architecture (Markdown)](docs/agentgate/architecture.md)
-- [AgentGate decisions](docs/agentgate/decisions.md)
-- [AgentGate standards alignment](docs/agentgate/standards.md)
+- [NawGate architecture (interactive)](docs/nawgate/architecture.html)
+- [NawGate architecture (Markdown)](docs/nawgate/architecture.md)
+- [NawGate decisions](docs/nawgate/decisions.md)
+- [NawGate standards alignment](docs/nawgate/standards.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)
