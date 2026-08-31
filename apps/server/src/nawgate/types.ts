@@ -330,7 +330,8 @@ export type GatewayDenyReasonCode =
   | "invalid_capability"
   | "risk_facts_malformed"
   | "risk_facts_changed"
-  | "approval_authority_revoked";
+  | "approval_authority_revoked"
+  | "audit_integrity_broken";
 
 export type GatewayResult =
   | {
@@ -503,6 +504,42 @@ export type AuditDecision = "allow" | "deny" | "require_approval";
 export type AuditRisk = RiskTier;
 export type AuditStatus = "success" | "failure" | "pending";
 
+export const AUDIT_INTEGRITY_VERSION = "nawgate-audit-v1" as const;
+export const AUDIT_HASH_ALGORITHM = "sha256" as const;
+
+export interface AuditChainState {
+  version: typeof AUDIT_INTEGRITY_VERSION;
+  algorithm: typeof AUDIT_HASH_ALGORITHM;
+  headSequence: number;
+  headHash: string | null;
+  legacyEventCount: number;
+  startedAt: string | null;
+}
+
+export type AuditIntegrityStatus = "verified" | "broken" | "not_yet_verified";
+export type AuditIntegrityReasonCode =
+  | "chain_valid"
+  | "no_chained_events"
+  | "invalid_sequence"
+  | "invalid_previous_hash"
+  | "invalid_event_hash"
+  | "duplicate_sequence"
+  | "unexpected_unchained_event"
+  | "head_mismatch"
+  | "invalid_chain_metadata"
+  | "persisted_state_mismatch";
+
+export interface AuditIntegrityReport {
+  status: AuditIntegrityStatus;
+  integrityVersion: typeof AUDIT_INTEGRITY_VERSION;
+  verifiedAt: string;
+  headSequence: number;
+  chainedEventCount: number;
+  unverifiedLegacyEventCount: number;
+  reasonCode: AuditIntegrityReasonCode;
+  firstBrokenSequence: number | null;
+}
+
 export interface AuditEvent {
   id: string;
   eventType: AuditEventType;
@@ -538,6 +575,10 @@ export interface AuditEvent {
   requiredApprovalCount: number | null;
   requiredApprovalRoles: ApprovalAuthorityRole[] | null;
   approvalDecisions: ApprovalDecision[] | null;
+  integrityVersion: typeof AUDIT_INTEGRITY_VERSION | null;
+  sequence: number | null;
+  previousHash: string | null;
+  eventHash: string | null;
 }
 
 export interface ActionExecutionRecord {

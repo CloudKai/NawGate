@@ -9,6 +9,7 @@ import type {
   AgentRun,
   ApprovalRecord,
   AuditEvent,
+  AuditIntegrityReport,
   HumanId,
   HumanPrincipal,
   Message,
@@ -68,6 +69,7 @@ export default function App() {
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [auditIntegrity, setAuditIntegrity] = useState<AuditIntegrityReport | null>(null);
   const [grants, setGrants] = useState<AgentTeamGrant[]>([]);
   const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
   const [revocationBusy, setRevocationBusy] = useState(false);
@@ -116,6 +118,7 @@ export default function App() {
       setApprovals(pendingResult.approvals);
       setApprovalHistory(allApprovalResult.approvals);
       setAudit(auditResult.audit);
+      setAuditIntegrity(auditResult.integrity);
       setGrants(grantResult.grants);
     }
   }, []);
@@ -155,6 +158,7 @@ export default function App() {
     setApprovals([]);
     setApprovalHistory([]);
     setAudit([]);
+    setAuditIntegrity(null);
     setGrants([]);
     if (!selectedId) {
       setMessages([]);
@@ -803,6 +807,7 @@ export default function App() {
               approvals={approvals}
               approvalHistory={approvalHistory}
               audit={audit}
+              auditIntegrity={auditIntegrity}
               busyApprovalId={approvalBusyId}
               revocationBusy={revocationBusy}
               onApprove={(approvalId) => void decideApproval(approvalId, "approve")}

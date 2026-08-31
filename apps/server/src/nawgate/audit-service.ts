@@ -16,6 +16,7 @@ import type {
 } from "./types.js";
 import { NAWGATE_POLICY_VERSION } from "./types.js";
 import { JsonStore } from "../store.js";
+import { appendAuditEvent } from "./audit-chain.js";
 
 export interface AuditEventInput {
   eventType: AuditEventType;
@@ -69,7 +70,7 @@ export class AuditService {
           .protectedResources.some((resource) => resource.id === input.resourceId)
         ? input.resourceId
         : "unknown";
-    const event: AuditEvent = {
+    const event: Omit<AuditEvent, "integrityVersion" | "sequence" | "previousHash" | "eventHash"> = {
       id: randomUUID(),
       eventType: input.eventType,
       createdAt: this.now(),
@@ -102,17 +103,23 @@ export class AuditService {
       temporaryScope: input.temporaryScope ?? null,
       rejectedFieldNames: input.rejectedFieldNames ? [...input.rejectedFieldNames] : null,
       riskVersion: input.riskVersion ?? null,
-      riskFactsDigest: input.riskFactsDigest ?? null,
+      riskFactsDigest:
+        input.riskFactsDigest && /^[0-9a-f]{64}$/.test(input.riskFactsDigest)
+          ? input.riskFactsDigest
+          : null,
       requiredApprovalCount: input.requiredApprovalCount ?? null,
       requiredApprovalRoles: input.requiredApprovalRoles ? [...input.requiredApprovalRoles] : null,
       approvalDecisions: input.approvalDecisions
         ? input.approvalDecisions.map((decision) => ({ ...decision }))
         : null,
     };
-    await this.store.mutate((database) => {
-      database.auditEvents.push(event);
-    });
-    return structuredClone(event);
+    return this.store.mutate((database) =>
+      structuredClone(appendAuditEvent(database, event, event.createdAt)),
+    );
+  }
+
+  async integrity() {
+    return this.store.verifyAuditIntegrity();
   }
 
   list(agentId: string, runId?: string): AuditEvent[] {
@@ -123,6 +130,9 @@ export class AuditService {
         (event) =>
           event.agentId === agentId && (runId === undefined || event.runId === runId),
       )
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      .sort((left, right) =>
+        (left.sequence ?? 0) - (right.sequence ?? 0) ||
+        left.createdAt.localeCompare(right.createdAt),
+      );
   }
 }

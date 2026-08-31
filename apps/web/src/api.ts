@@ -4,6 +4,7 @@ import type {
   AgentTeamGrant,
   ApprovalRecord,
   AuditEvent,
+  AuditIntegrityReport,
   HumanId,
   Message,
   ReplayPayload,
@@ -96,7 +97,7 @@ export const api = {
         (status ? "?status=" + encodeURIComponent(status) : ""),
     ),
   audit: (id: string, runId?: string, limit = 20) =>
-    request<{ audit: AuditEvent[] }>(
+    request<{ audit: AuditEvent[]; integrity: AuditIntegrityReport }>(
       "/api/agents/" +
         id +
         "/audit?limit=" +

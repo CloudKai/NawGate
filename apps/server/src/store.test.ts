@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates v1 data to v7 and seeds team relationships without grants", async () => {
+  it("migrates v1 data to v8 and seeds team relationships without grants", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -47,7 +47,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(7);
+    expect(database.version).toBe(8);
     expect(database.agentTeamGrants).toEqual([]);
     expect(database.agents[0]?.ownerUserId).toBe("user-a");
     expect(database.protectedResources.map((resource) => resource.id)).toEqual([
@@ -84,7 +84,7 @@ describe("JsonStore", () => {
       { teamId: "team-beta", humanId: "user-b", role: "admin" },
     ]);
     expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
-      version: 7,
+      version: 8,
       agentTeamGrants: [],
     });
   });
@@ -108,7 +108,7 @@ describe("JsonStore", () => {
     const store = new JsonStore(filePath);
     await store.initialize();
 
-    expect(store.snapshot().version).toBe(7);
+    expect(store.snapshot().version).toBe(8);
     expect(store.snapshot().agentTeamGrants).toEqual([]);
     expect(store.snapshot().teamMemberships).toHaveLength(3);
     expect(store.snapshot().protectedResources).toEqual(
@@ -152,7 +152,7 @@ describe("JsonStore", () => {
     );
   });
 
-  it("migrates v3 relationships to v7 without silently enrolling Agents", async () => {
+  it("migrates v3 relationships to v8 without silently enrolling Agents", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v3-test-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -198,7 +198,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     const database = store.snapshot();
-    expect(database.version).toBe(7);
+    expect(database.version).toBe(8);
     expect(database.agentTeamGrants).toEqual([]);
     expect(database.teamMemberships).toEqual(
       expect.arrayContaining([

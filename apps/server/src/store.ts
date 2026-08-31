@@ -18,6 +18,11 @@ import {
   ApprovalAuthorityService,
   isApprovalAuthorityEligible,
 } from "./nawgate/approval-authority-service.js";
+import {
+  emptyAuditChainState,
+  verifyAuditChain,
+  AuditIntegrityError,
+} from "./nawgate/audit-chain.js";
 import type {
   AgentTeamGrant,
   NawGateAction,
@@ -49,7 +54,7 @@ const deploymentFixtures: readonly DeploymentState[] = [
 ];
 
 const emptyDatabase = (): Database => seedDatabase({
-  version: 7,
+  version: 8,
   agents: [],
   messages: [],
   runs: [],
@@ -66,11 +71,25 @@ const emptyDatabase = (): Database => seedDatabase({
   approvalAuthorities: [],
 });
 
+type DatabaseSeed = Omit<Database, "version" | "auditChain"> & {
+  version: number;
+  auditChain?: Database["auditChain"];
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function seedDatabase(database: Database, seedDestinations = true): Database {
+function seedDatabase(database: DatabaseSeed, seedDestinations = true): Database {
+  const sourceVersion = database.version;
+  const seeded = database as Database & { auditChain?: Database["auditChain"] };
+  seeded.version = 8;
+  if (sourceVersion !== 8 || !seeded.auditChain) {
+    seeded.auditChain = {
+      ...emptyAuditChainState(),
+      legacyEventCount: database.auditEvents.length,
+    };
+  }
   for (const resource of DEMO_PROTECTED_RESOURCES) {
     if (!database.protectedResources.some((item) => item.id === resource.id)) {
       database.protectedResources.push(structuredClone(resource));
@@ -110,7 +129,7 @@ function seedDatabase(database: Database, seedDestinations = true): Database {
       database.approvalAuthorities.push(structuredClone(authority));
     }
   }
-  return invalidateStaleDestinationClaims(database);
+  return invalidateStaleDestinationClaims(seeded as Database);
 }
 
 function isTeamMembership(value: unknown): value is TeamMembership {
@@ -339,6 +358,30 @@ function migrateAuditEvents(value: unknown[]): Database["auditEvents"] {
             }];
           })
         : null,
+      integrityVersion: null,
+      sequence: null,
+      previousHash: null,
+      eventHash: null,
+    };
+  });
+}
+
+function migrateAuditEventsV8(value: unknown[]): Database["auditEvents"] {
+  return value.map((candidate) => {
+    const record = isRecord(candidate) ? candidate : {};
+    const migrated = migrateAuditEvents([record])[0]!;
+    return {
+      ...migrated,
+      integrityVersion:
+        record.integrityVersion === "nawgate-audit-v1"
+          ? record.integrityVersion
+          : null,
+      sequence:
+        typeof record.sequence === "number" && Number.isInteger(record.sequence)
+          ? record.sequence
+          : null,
+      previousHash: typeof record.previousHash === "string" ? record.previousHash : null,
+      eventHash: typeof record.eventHash === "string" ? record.eventHash : null,
     };
   });
 }
@@ -923,6 +966,67 @@ export function migrateDatabase(value: unknown): Database {
     throw new Error("Unsupported database format");
   }
 
+  // v8 is already normalized. Preserve it at the data-model boundary so the
+  // integrity verifier can report tampering instead of migration silently
+  // repairing or hiding it.
+  if (value.version === 8) {
+    if (
+      !value.agents.every(
+        (agent) =>
+          isRecord(agent) &&
+          typeof agent.ownerUserId === "string" &&
+          isHumanId(agent.ownerUserId),
+      ) ||
+      !Array.isArray(value.approvals) ||
+      !Array.isArray(value.auditEvents) ||
+      !Array.isArray(value.protectedResources) ||
+      !Array.isArray(value.deploymentStates) ||
+      !Array.isArray(value.actionExecutions) ||
+      !Array.isArray(value.teamMemberships) ||
+      !Array.isArray(value.agentTeamGrants) ||
+      !Array.isArray(value.capabilityClaims) ||
+      !Array.isArray(value.registeredDestinations) ||
+      !Array.isArray(value.destinationReceipts) ||
+      !Array.isArray(value.approvalAuthorities) ||
+      !value.teamMemberships.every(isTeamMembership) ||
+      !value.agentTeamGrants.every(isAgentTeamGrant) ||
+      !isValidAgentTeamGrantSet(
+        value.agentTeamGrants as AgentTeamGrant[],
+        value.agents as Database["agents"],
+      ) ||
+      !value.registeredDestinations.every((destination) =>
+        migrateRegisteredDestinationsForVersion([destination], false).length === 1,
+      ) ||
+      !value.destinationReceipts.every(isDestinationSideEffectReceipt) ||
+      !isValidApprovalAuthoritySet(value.approvalAuthorities as ApprovalAuthority[])
+    ) {
+      throw new Error("Unsupported database format");
+    }
+    const approvals = migrateApprovals(value.approvals);
+    const authorities = value.approvalAuthorities as Database["approvalAuthorities"];
+    const capabilityClaims = migrateCapabilityClaims(value.capabilityClaims, approvals, authorities);
+    reconcileApprovalClaims(approvals, capabilityClaims, authorities);
+    const migrated: Database = {
+      version: 8,
+      agents: structuredClone(value.agents) as Database["agents"],
+      messages: structuredClone(value.messages) as Database["messages"],
+      runs: structuredClone(value.runs) as Database["runs"],
+      approvals,
+      auditEvents: migrateAuditEventsV8(value.auditEvents),
+      protectedResources: migrateProtectedResources(value.protectedResources),
+      deploymentStates: structuredClone(value.deploymentStates) as Database["deploymentStates"],
+      actionExecutions: migrateActionExecutions(value.actionExecutions),
+      teamMemberships: structuredClone(value.teamMemberships) as Database["teamMemberships"],
+      agentTeamGrants: structuredClone(value.agentTeamGrants) as Database["agentTeamGrants"],
+      capabilityClaims,
+      registeredDestinations: migrateRegisteredDestinationsForVersion(value.registeredDestinations, false),
+      destinationReceipts: structuredClone(value.destinationReceipts) as Database["destinationReceipts"],
+      approvalAuthorities: structuredClone(value.approvalAuthorities) as Database["approvalAuthorities"],
+      auditChain: structuredClone(value.auditChain) as Database["auditChain"],
+    };
+    return invalidateStaleDestinationClaims(migrated);
+  }
+
   if (value.version === 1) {
     if (!value.agents.every(isRecord)) {
       throw new Error("Unsupported database format");
@@ -1141,6 +1245,7 @@ export function migrateDatabase(value: unknown): Database {
 export class JsonStore {
   private data: Database = emptyDatabase();
   private queue: Promise<void> = Promise.resolve();
+  private integrity = verifyAuditChain(this.data);
 
   constructor(private readonly filePath: string) {}
 
@@ -1148,13 +1253,27 @@ export class JsonStore {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       const raw = await readFile(this.filePath, "utf8");
-      this.data = migrateDatabase(JSON.parse(raw) as unknown);
+      const parsed = JSON.parse(raw) as unknown;
+      const rawIntegrity =
+        isRecord(parsed) && parsed.version === 8 && Array.isArray(parsed.auditEvents)
+          ? verifyAuditChain({
+              auditEvents: parsed.auditEvents as Database["auditEvents"],
+              auditChain: parsed.auditChain as Database["auditChain"],
+            })
+          : null;
+      this.data = migrateDatabase(parsed);
+      this.integrity = rawIntegrity ?? verifyAuditChain(this.data);
+      // Never rewrite a v8 file during startup. A broken file remains
+      // readable for inspection and all subsequent mutations fail closed.
+      if (isRecord(parsed) && parsed.version === 8 && this.integrity.status === "broken") return;
       await this.persist();
+      this.integrity = verifyAuditChain(this.data);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
       await this.persist();
+      this.integrity = verifyAuditChain(this.data);
     }
   }
 
@@ -1162,13 +1281,86 @@ export class JsonStore {
     return structuredClone(this.data);
   }
 
+  async verifyAuditIntegrity(): Promise<ReturnType<typeof verifyAuditChain>> {
+    const verifiedAt = new Date().toISOString();
+    const invalid = () => ({
+      status: "broken" as const,
+      integrityVersion: "nawgate-audit-v1" as const,
+      verifiedAt,
+      headSequence: 0,
+      chainedEventCount: 0,
+      unverifiedLegacyEventCount: 0,
+      reasonCode: "invalid_chain_metadata" as const,
+      firstBrokenSequence: null,
+    });
+    let persisted: Database;
+    try {
+      const raw = await readFile(this.filePath, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+      if (
+        isRecord(parsed) &&
+        parsed.version === 8 &&
+        Array.isArray(parsed.auditEvents)
+      ) {
+        // Verify the raw v8 event objects before any compatibility sanitizer
+        // can remove an unexpected field from a tampered record.
+        const rawResult = verifyAuditChain({
+          auditEvents: parsed.auditEvents as Database["auditEvents"],
+          auditChain: parsed.auditChain as Database["auditChain"],
+        }, verifiedAt);
+        if (rawResult.status === "broken") {
+          this.integrity = rawResult;
+          return rawResult;
+        }
+      }
+      persisted = migrateDatabase(parsed);
+    } catch {
+      const result = invalid();
+      this.integrity = result;
+      return result;
+    }
+    const persistedResult = verifyAuditChain(persisted, verifiedAt);
+    const memoryResult = verifyAuditChain(this.data, verifiedAt);
+    if (persistedResult.status === "broken") {
+      this.integrity = persistedResult;
+      return persistedResult;
+    }
+    if (memoryResult.status === "broken") {
+      this.integrity = memoryResult;
+      return memoryResult;
+    }
+    const persistedHead = persisted.auditChain;
+    const memoryHead = this.data.auditChain;
+    if (
+      persistedHead.headSequence !== memoryHead.headSequence ||
+      persistedHead.headHash !== memoryHead.headHash ||
+      persisted.auditEvents.length !== this.data.auditEvents.length
+    ) {
+      const result = {
+        ...persistedResult,
+        status: "broken" as const,
+        reasonCode: "persisted_state_mismatch" as const,
+        firstBrokenSequence: null,
+      };
+      this.integrity = result;
+      return result;
+    }
+    this.integrity = persistedResult;
+    return persistedResult;
+  }
+
   async mutate<T>(mutation: (database: Database) => T | Promise<T>): Promise<T> {
     let result!: T;
     const operation = this.queue.then(async () => {
+      const integrity = await this.verifyAuditIntegrity();
+      if (integrity.status === "broken") throw new AuditIntegrityError();
       const next = structuredClone(this.data);
       result = await mutation(next);
+      const nextIntegrity = verifyAuditChain(next);
+      if (nextIntegrity.status === "broken") throw new AuditIntegrityError();
       await this.persist(next);
       this.data = next;
+      this.integrity = nextIntegrity;
     });
     this.queue = operation.catch(() => undefined);
     await operation;

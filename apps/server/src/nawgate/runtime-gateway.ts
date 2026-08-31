@@ -404,6 +404,9 @@ export class RuntimeGateway {
     request: GatewayRequest,
   ): Promise<GatewayResult> {
     const startedAt = Date.now();
+    if ((await this.audit.integrity()).status === "broken") {
+      return this.auditIntegrityDenied(context, request);
+    }
     if (!isRuntimeContext(context) || !isGatewayRequest(request)) {
       const requestId = isRecord(request) && typeof request.requestId === "string"
         ? request.requestId
@@ -416,11 +419,14 @@ export class RuntimeGateway {
         : "unknown";
       await this.audit.record({
         eventType: "policy.deny",
-        humanId: null,
+        // Do not place attacker-controlled malformed request fields in audit
+        // evidence. The response remains correlated for the caller, while
+        // the audit record contains only trusted context and safe constants.
+        humanId: isRuntimeContext(context) ? context.humanId : null,
         agentId: null,
         runId: null,
-        requestId,
-        action: isRegisteredAction(action) ? action : null,
+        requestId: null,
+        action: null,
         resourceId: null,
         decision: "deny",
         risk: "high",
@@ -1075,6 +1081,13 @@ export class RuntimeGateway {
       expectedRisk ?? latestRisk,
       approvalRequest,
     );
+    // Audit evidence is part of the protected-action trust boundary. Check
+    // the persisted chain again immediately before entering the resource
+    // boundary; JsonStore performs the same check for the transaction that
+    // contains the final mutable-authority recheck and side effect.
+    if ((await this.audit.integrity()).status === "broken") {
+      return this.auditIntegrityDenied(context, request);
+    }
     try {
       const result = await this.resources.execute(request.action, request.resourceId, {
         runId: context.runId,
@@ -1423,6 +1436,20 @@ export class RuntimeGateway {
       action: request.action,
       resourceId: request.resourceId,
       reasonCode: reasonCodeOverride ?? decision.reasonCode,
+    };
+  }
+
+  private auditIntegrityDenied(
+    _context: TrustedRuntimeContext,
+    request: GatewayRequest,
+  ): GatewayResult {
+    const candidate: Record<string, unknown> = isRecord(request) ? request : {};
+    return {
+      status: "denied",
+      requestId: typeof candidate.requestId === "string" ? candidate.requestId : "unknown",
+      action: typeof candidate.action === "string" ? candidate.action : "unknown",
+      resourceId: typeof candidate.resourceId === "string" ? candidate.resourceId : "unknown",
+      reasonCode: "audit_integrity_broken",
     };
   }
 

@@ -176,6 +176,21 @@ export interface AuditEvent {
   requiredApprovalCount: number | null;
   requiredApprovalRoles: ("owner" | "independent_reviewer")[] | null;
   approvalDecisions: ApprovalRecord["approvalDecisions"] | null;
+  integrityVersion: "nawgate-audit-v1" | null;
+  sequence: number | null;
+  previousHash: string | null;
+  eventHash: string | null;
+}
+
+export interface AuditIntegrityReport {
+  status: "verified" | "broken" | "not_yet_verified";
+  integrityVersion: "nawgate-audit-v1";
+  verifiedAt: string;
+  headSequence: number;
+  chainedEventCount: number;
+  unverifiedLegacyEventCount: number;
+  reasonCode: string;
+  firstBrokenSequence: number | null;
 }
 
 export type SecurityLabScenario =

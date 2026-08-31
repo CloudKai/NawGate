@@ -33,6 +33,10 @@ export class AgentService {
   async initialize(): Promise<void> {
     await this.store.initialize();
     await this.workspaces.initialize();
+    // A well-formed but tampered v8 database is intentionally readable for
+    // evidence inspection, but startup must not rewrite it or mutate active
+    // Run state while the audit chain is in write quarantine.
+    if ((await this.store.verifyAuditIntegrity()).status === "broken") return;
     const interruptedRunIds: string[] = [];
     await this.store.mutate((database) => {
       for (const run of database.runs) {

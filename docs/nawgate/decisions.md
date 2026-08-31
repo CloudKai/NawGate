@@ -68,6 +68,20 @@ claims that cannot prove the new exact binding. V7 also requires explicit
 trusted content asset risk metadata and valid destination audience, reach, and
 region enums; only the narrow v6 fixture migration may enrich those fields.
 
+## Tamper-evident audit evidence
+
+The v8 store keeps one global audit chain rather than separate per-Agent
+chains. Redaction and safe normalization happen before hashing; sequence and
+hash allocation happen within the existing serialized store mutation, so
+concurrent evidence cannot reuse a sequence. The verifier checks linkage,
+ordering, event hashes, persisted head metadata, and the legacy-event boundary.
+Legacy v1-v7 events are retained with null integrity fields and remain
+unverified. A broken chain is placed in read-only quarantine: it is surfaced
+through the owner-only audit API and UI, but it cannot be silently healed or
+used to authorize a protected side effect. The design provides tamper evidence
+for accidental or partial edits; it does not provide an external immutable
+checkpoint or protection from a database owner who recomputes the entire file.
+
 ## Deterministic risk and optional dual control
 
 `risk-v1` is a pure deterministic engine. Its facts are derived by the

@@ -4,10 +4,11 @@ import type { ReplayPayload } from "../../types";
 interface FlightReplayModalProps {
   replay: ReplayPayload | null;
   loading: boolean;
+  error: string | null;
   onClose: () => void;
 }
 
-export function FlightReplayModal({ replay, loading, onClose }: FlightReplayModalProps) {
+export function FlightReplayModal({ replay, loading, error, onClose }: FlightReplayModalProps) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -18,7 +19,7 @@ export function FlightReplayModal({ replay, loading, onClose }: FlightReplayModa
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  if (!loading && !replay) return null;
+  if (!loading && !replay && !error) return null;
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose} role="dialog" aria-modal="true">
@@ -49,6 +50,11 @@ export function FlightReplayModal({ replay, loading, onClose }: FlightReplayModa
           <div className="replay-loading">
             <span className="spinner" />
             <p>Loading flight data recording…</p>
+          </div>
+        ) : error ? (
+          <div className="replay-empty" role="alert">
+            <strong>Replay unavailable</strong>
+            <p>{error}</p>
           </div>
         ) : replay ? (
           <div className="replay-content">

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { api } from "../../api";
-import type { Agent, AgentTeamGrant, ApprovalRecord, AuditEvent, ReplayPayload } from "../../types";
+import { ApiError, api } from "../../api";
+import type { Agent, AgentTeamGrant, ApprovalRecord, AuditEvent, AuditIntegrityReport, ReplayPayload } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
 import { AuditTimeline } from "./AuditTimeline";
 import { DelegationReceipt } from "./DelegationReceipt";
@@ -11,6 +11,7 @@ interface NawGatePanelProps {
   agent: Agent;
   approvals: ApprovalRecord[];
   audit: AuditEvent[];
+  auditIntegrity: AuditIntegrityReport | null;
   approvalHistory: ApprovalRecord[];
   busyApprovalId: string | null;
   revocationBusy: boolean;
@@ -28,6 +29,7 @@ export function NawGatePanel({
   agent,
   approvals,
   audit,
+  auditIntegrity,
   approvalHistory,
   busyApprovalId,
   revocationBusy,
@@ -43,16 +45,25 @@ export function NawGatePanel({
   const [grantRole, setGrantRole] = useState<"viewer" | "editor" | "admin">("viewer");
   const [activeReplay, setActiveReplay] = useState<ReplayPayload | null>(null);
   const [replayLoading, setReplayLoading] = useState(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const [showReplayModal, setShowReplayModal] = useState(false);
 
   const handleViewReplay = async (runId: string) => {
     setShowReplayModal(true);
     setReplayLoading(true);
+    setActiveReplay(null);
+    setReplayError(null);
     try {
       const { replay } = await api.getReplay(agent.id, runId);
       setActiveReplay(replay);
-    } catch {
-      setActiveReplay(null);
+    } catch (error) {
+      setReplayError(
+        error instanceof ApiError && error.code === "AUDIT_INTEGRITY_BROKEN"
+          ? "Replay is unavailable because audit integrity could not be verified."
+          : error instanceof ApiError && error.status === 404
+            ? "No flight recording exists for this Run. Security Lab demo Runs keep audit evidence but do not create Playground flight recordings."
+            : "The flight recording could not be loaded. Try a completed Playground Run.",
+      );
     } finally {
       setReplayLoading(false);
     }
@@ -61,6 +72,7 @@ export function NawGatePanel({
   const handleCloseReplay = () => {
     setShowReplayModal(false);
     setActiveReplay(null);
+    setReplayError(null);
   };
 
   const alphaGrant = grants.find(
@@ -173,8 +185,27 @@ export function NawGatePanel({
         <div className="audit-section">
           <div className="nawgate-section-title">
             <strong>Audit timeline</strong>
-            <span>latest</span>
+            {auditIntegrity && (
+              <span className={"audit-integrity audit-integrity-" + auditIntegrity.status}>
+                {auditIntegrity.status === "verified"
+                  ? "Verified"
+                  : auditIntegrity.status === "broken"
+                    ? "Integrity broken"
+                    : "Not yet verified"}
+              </span>
+            )}
           </div>
+          {auditIntegrity && (
+            <p className="audit-integrity-help">
+              {auditIntegrity.status === "verified"
+                ? auditIntegrity.unverifiedLegacyEventCount > 0
+                  ? `Post-migration evidence verified; ${auditIntegrity.unverifiedLegacyEventCount} legacy event${auditIntegrity.unverifiedLegacyEventCount === 1 ? "" : "s"} remain unverified.`
+                  : `All chained evidence verified through sequence ${auditIntegrity.headSequence}.`
+                : auditIntegrity.status === "broken"
+                  ? `Audit continuity failed${auditIntegrity.firstBrokenSequence ? ` at sequence ${auditIntegrity.firstBrokenSequence}` : ""}. Protected actions are disabled.`
+                  : "No chained audit evidence has been recorded yet."}
+            </p>
+          )}
           <AuditTimeline events={audit} onViewReplay={handleViewReplay} />
         </div>
       </div>
@@ -184,6 +215,7 @@ export function NawGatePanel({
         <FlightReplayModal
           replay={activeReplay}
           loading={replayLoading}
+          error={replayError}
           onClose={handleCloseReplay}
         />
       )}

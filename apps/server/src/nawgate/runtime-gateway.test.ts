@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DeterministicPolicyEngine } from "./policy-engine.js";
 import { ApprovalService } from "./approval-service.js";
 import { AuditService } from "./audit-service.js";
+import { AuditIntegrityError } from "./audit-chain.js";
 import { ProtectedResourceService } from "./protected-resource-service.js";
 import { RuntimeGateway } from "./runtime-gateway.js";
 import { JsonStore } from "../store.js";
@@ -865,6 +866,27 @@ describe("RuntimeGateway", () => {
     expect(resources.getExecutionCount("file.read", "team-alpha-internal")).toBe(0);
   });
 
+  it("does not audit attacker-controlled fields from malformed runtime requests", async () => {
+    const { gateway, audit, store } = await makeGateway();
+    const forgedRequestId = "attacker-controlled-request-id";
+    const result = await gateway.execute(context, {
+      requestId: forgedRequestId,
+      action: "resource.read",
+      resourceId: "project-a",
+      unexpected: "not-a-runtime-field",
+    } as never);
+
+    expect(result).toMatchObject({ status: "denied", reasonCode: "invalid_context" });
+    expect(store.snapshot().auditEvents.at(-1)).toMatchObject({
+      eventType: "policy.deny",
+      humanId: "user-a",
+      requestId: null,
+      action: null,
+      resourceId: null,
+    });
+    expect(JSON.stringify(store.snapshot().auditEvents)).not.toContain(forgedRequestId);
+  });
+
   it("does not deploy production before approval", async () => {
     const { gateway, resources, approvals, audit } = await makeGateway();
     const result = await gateway.execute(context, {
@@ -1241,5 +1263,40 @@ describe("RuntimeGateway", () => {
     expect(retry).toMatchObject({ status: "denied", reasonCode: "approval_denied" });
     expect(await approvals.list("user-a")).toHaveLength(1);
     expect(resources.getExecutionCount("deploy.production", "production")).toBe(0);
+  });
+
+  it("fails closed for live audit tampering before a protected side effect", async () => {
+    const { gateway, resources, store, audit } = await makeGateway();
+    const filePath = (store as unknown as { filePath: string }).filePath;
+    const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
+      auditChain: { headHash: string | null };
+    };
+    persisted.auditChain.headHash = "1".repeat(64);
+    await writeFile(filePath, JSON.stringify(persisted, null, 2) + "\n", "utf8");
+
+    await expect(audit.record({
+      eventType: "policy.deny",
+      humanId: "user-a",
+      agentId: "agent-a",
+      runId: "run-a",
+      requestId: "request-after-tamper",
+      action: "resource.read",
+      resourceId: "project-a",
+      decision: "deny",
+      risk: "low",
+      reasonCode: "tampered_chain",
+      approvalId: null,
+      capabilityId: null,
+      status: "failure",
+      durationMs: 1,
+    })).rejects.toBeInstanceOf(AuditIntegrityError);
+
+    const result = await gateway.execute(context, {
+      requestId: "request-protected-after-tamper",
+      action: "resource.read",
+      resourceId: "project-a",
+    });
+    expect(result).toMatchObject({ status: "denied", reasonCode: "audit_integrity_broken" });
+    expect(resources.getExecutionCount("resource.read", "project-a")).toBe(0);
   });
 });

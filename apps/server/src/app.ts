@@ -181,6 +181,15 @@ function sendRuntimeResult(reply: {
     });
   }
   if (result.status === "denied") {
+    if (result.reasonCode === "audit_integrity_broken") {
+      return reply.code(503).send({
+        status: "denied",
+        requestId: result.requestId,
+        code: "AUDIT_INTEGRITY_BROKEN",
+        reasonCode: result.reasonCode,
+        message: "Protected actions are temporarily disabled because audit integrity could not be verified.",
+      });
+    }
     return reply.code(403).send({
       status: "denied",
       requestId: result.requestId,
@@ -375,14 +384,28 @@ export async function createApp(
       const query = auditQuery.parse(request.query);
       const actor = humanActor(request);
       service.getAgent(id, actor);
-      const events = runtime.audit.list(id, query.runId);
-      return { audit: events.slice(Math.max(0, events.length - query.limit)) };
+      const integrity = await runtime.audit.integrity();
+      return {
+        audit:
+          integrity.status === "broken"
+            ? []
+            : runtime.audit.list(id, query.runId).slice(-query.limit),
+        integrity,
+      };
     });
 
-    app.get("/api/agents/:id/replays/:runId", async (request) => {
+    app.get("/api/agents/:id/replays/:runId", async (request, reply) => {
       const { id, runId } = agentReplayParams.parse(request.params);
       const actor = humanActor(request);
       service.getAgent(id, actor);
+      const integrity = await runtime.audit.integrity();
+      if (integrity.status === "broken") {
+        return reply.code(503).send({
+          code: "AUDIT_INTEGRITY_BROKEN",
+          error: "Flight replay is temporarily unavailable because audit integrity could not be verified.",
+          integrity,
+        });
+      }
       const replay = await getReplay(id, runId, config.dataDirectory);
       if (!replay) {
         throw new HttpError(404, "Flight replay not found");

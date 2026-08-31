@@ -1177,6 +1177,37 @@ textarea:focus {
   font-size: 9px;
 }
 
+.audit-integrity {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.audit-integrity-verified {
+  color: var(--green) !important;
+  background: #eef8f2;
+}
+
+.audit-integrity-broken {
+  color: var(--red) !important;
+  background: #fff1ef;
+}
+
+.audit-integrity-not_yet_verified {
+  color: #9a7b2f !important;
+  background: #fff8e5;
+}
+
+.audit-integrity-help {
+  margin: -3px 0 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .nawgate-empty {
   margin: 0;
   color: var(--muted);
@@ -1906,6 +1937,23 @@ textarea:focus {
   justify-content: center;
   gap: 16px;
   color: var(--muted);
+}
+
+.replay-empty {
+  margin: 18px 0;
+  padding: 28px;
+  border: 1px solid #ead6d3;
+  border-radius: 12px;
+  background: #fff7f5;
+  color: #7c403b;
+  text-align: center;
+}
+
+.replay-empty p {
+  margin: 8px auto 0;
+  max-width: 520px;
+  color: #765d59;
+  line-height: 1.5;
 }
 
 .replay-content {

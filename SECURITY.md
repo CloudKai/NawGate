@@ -35,6 +35,12 @@ credentials, personal data, or exploit details in an issue.
 - The Security Lab is an explicitly enabled local/demo helper that invokes the
   same RuntimeGateway and returns redacted evidence. It is not enabled by
   default and is not a substitute for production test tooling.
+- New audit records use a redacted, globally sequenced SHA-256 chain. The
+  backend verifies the persisted chain, exposes only a safe integrity report,
+  and disables new audit writes and registered protected actions if the chain
+  is broken. Pre-v8 events are retained as explicitly unverified legacy
+  evidence. This is tamper-evident, not tamper-proof: an actor with unrestricted
+  database write access could rewrite and recompute the complete chain.
 - TikTok-oriented content actions are deterministic synthetic adapters only;
   they make no external TikTok calls, accept no arbitrary URLs, and should not
   be treated as a production content platform integration. Destination

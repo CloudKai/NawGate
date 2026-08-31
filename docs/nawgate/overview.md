@@ -28,6 +28,10 @@ that can execute a protected side effect.
 - Every decision is redacted audit evidence. Policy decisions carry the
   central version `bouncer-v5`, deterministic risk version `risk-v1`, a safe
   risk-facts digest, explanation, and `RuntimeGateway` as the enforcement point.
+- New audit evidence is assigned a global monotonic sequence and chained with
+  a persisted SHA-256 hash after redaction. The owner-only audit API reports
+  `verified`, `broken`, or `not_yet_verified`; live persisted-file tampering
+  blocks new writes and protected actions without rewriting the damaged file.
 - Risk is assigned by a pure backend risk engine from trusted action, resource
   classification, destination audience/reach/environment, asset type, region,
   and resource/destination revisions. Runtime payloads cannot lower the tier.
@@ -78,6 +82,10 @@ action, resource, risk tier/version, approval count/roles, safe approver
 identifiers, reason, policy version, enforcement point, timestamps, expiry,
 uses, and status. It never displays a runtime credential, API key, payload, or
 protected resource content.
+
+The Audit timeline also shows the backend integrity status. Legacy events from
+before the v8 migration remain visible but are explicitly counted as
+unverified; they are never retroactively treated as part of the trusted chain.
 
 When enabled for the local POC, the Security Lab in the side panel runs
 redacted scenarios through the real RuntimeGateway: own/cross-user resources,

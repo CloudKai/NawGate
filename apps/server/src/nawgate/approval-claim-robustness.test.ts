@@ -198,7 +198,7 @@ describe("durable approval claims", () => {
     }), "utf8");
     const store = new JsonStore(filePath);
     await store.initialize();
-    expect(store.snapshot().version).toBe(7);
+    expect(store.snapshot().version).toBe(8);
     expect(store.snapshot().capabilityClaims).toEqual([]);
     expect(store.snapshot().approvals[0]).toMatchObject({ status: "revoked", reasonCode: "legacy_unbound_approval" });
   });

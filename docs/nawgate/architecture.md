@@ -210,6 +210,15 @@ protected side effect executed. The Web Delegation Receipt is a safe
 human-readable view of that evidence. Neither surface includes a raw runtime
 credential, API key, payload, or protected content.
 
+New v8 audit events are globally sequenced inside the serialized `JsonStore`
+mutation and linked with a domain-separated SHA-256 `previousHash`/`eventHash`
+chain. Verification reads the persisted database so a live edit is visible to
+the Audit API and UI. A broken chain is readable for diagnosis, but new audit
+writes and registered protected side effects fail closed; startup never
+rewrites a broken v8 file. Events migrated from v1-v7 remain an explicitly
+unverified prefix. This is tamper-evident, not tamper-proof against an actor
+who can rewrite the entire database and recompute every hash.
+
 ## Security Lab
 
 The local-only Security Lab calls the real `RuntimeGateway`; the Web UI never

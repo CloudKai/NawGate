@@ -10,6 +10,7 @@ import type {
   TeamMembership,
   RegisteredDestination,
   DestinationSideEffectReceipt,
+  AuditChainState,
 } from "./nawgate/types.js";
 
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
@@ -59,7 +60,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 7;
+  version: 8;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -74,6 +75,7 @@ export interface Database {
   registeredDestinations: RegisteredDestination[];
   destinationReceipts: DestinationSideEffectReceipt[];
   approvalAuthorities: ApprovalAuthority[];
+  auditChain: AuditChainState;
 }
 
 export interface CreateAgentInput {

@@ -34,6 +34,11 @@ Open `http://localhost:3000` and use the side panel:
 10. Select **Queued after revoke**. It shows an actual initial allow paused
     before the side effect, owner-style authority revocation, and the final
     RuntimeGateway recheck deny with zero execution.
+11. The Audit timeline displays `Verified` after these events. If the
+    persisted `launchpad.json` is edited while the server is running, refresh
+    the Agent: the UI reports `Integrity broken`, preserves the evidence for
+    inspection, and protected actions are disabled until the damaged store is
+    restored from a trusted copy.
 
 The receipt is evidence only: it contains metadata and status, never secrets.
 
