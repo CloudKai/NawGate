@@ -18,6 +18,7 @@ export function DemoActorSwitch({ actor, disabled = false, onSwitch }: DemoActor
       >
         <option value="user-a">User A</option>
         <option value="user-b">User B</option>
+        <option value="user-c">User C · Org A reviewer</option>
       </select>
     </label>
   );

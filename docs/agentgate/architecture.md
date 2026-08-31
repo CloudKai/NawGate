@@ -18,9 +18,14 @@ flowchart LR
   Runtime --> CLI[agentctl]
   CLI --> Gateway[RuntimeGateway]
   Gateway --> Policy[PolicyEngine]
+  Gateway --> Risk[Deterministic risk-v1 engine]
+  Gateway --> Authorities[ApprovalAuthorityService]
   Gateway --> Memberships[TeamMembershipService]
   Gateway --> Grants[AgentTeamGrantService]
   Gateway --> Resources[ProtectedResourceService]
+  Gateway --> Destinations[Registered destination catalogue]
+  Destinations --> Broker[Server-side credential broker]
+  Destinations --> Adapter[Local fake destination adapter]
   Gateway --> Audit[AuditService]
   Gateway --> Store[(JsonStore)]
   Runtime --> Provider[Ark or OpenAI-compatible Responses API]
@@ -54,11 +59,14 @@ separate Runtime dependency, not an authorization authority.
 
 1. `AgentService` starts a Run and `MiddlewareRunner` issues a scoped identity.
 2. `agentctl` submits a registered action through the Runtime gateway.
-3. The gateway denies unknown or cross-owner resources, allows low-risk owned
-   reads/staging deploys, or creates a pending production approval.
-4. Only the owning human can approve. The capability claim is exact-bound and
-   usable once; its canonical payload digest, optional destination, policy
-   revision, and resource revision are persisted with the claim metadata.
+3. The gateway denies unknown or cross-owner resources before risk or approval,
+   assigns `risk-v1` from trusted structured facts, allows low-risk actions,
+   or creates a one-owner or dual-control approval.
+4. Approval authorities are backend-owned records with human, organisation or
+   account scope, allowed actions/tiers, role, status, and revision. A critical
+   claim requires distinct owner and independent-reviewer decisions. The claim
+   is exact-bound and usable once; its canonical payload digest, destination,
+   policy/risk revisions, risk-facts digest, and approval decisions are persisted.
 5. Run completion, failure, cancellation, or explicit owner revocation removes
    runtime authority. Explicit revocation also invalidates pending and approved
    capabilities.
@@ -94,9 +102,37 @@ one-use capability remains bound to the full request payload and destination.
 The destinations and content are synthetic identifiers/data; no external
 TikTok or arbitrary URL calls are made.
 
-## Bouncer v4: temporary JIT elevation
+### Registered destination catalogue and credential broker
 
-`bouncer-v4` keeps persistent Agent enrollment separate from exceptional
+The destination ID is an opaque reference, not a URL. The persisted
+server-owned catalogue contains exactly four local demo destinations:
+
+```text
+tiktok-account:brand-sg       -> content.publish / account-user-a
+tiktok-account:creator-demo   -> content.publish / account-user-b
+analytics:approved-dashboard  -> content.disclose / account-user-a
+archive:compliance-store      -> content.export / org-user-a
+```
+
+Each record also carries the organisation, business centre, allowed purpose,
+`POST` HTTPS host/path pattern, classification, status, revision, environment,
+and credential reference. `RuntimeGateway` resolves the record from the
+catalogue before policy evaluation and fails closed if that server-side record
+is absent, disabled/revoked, stale, malformed, or mismatched. Static destination
+data is not an authorization fallback.
+
+After the final policy/resource/destination revision check, the local adapter
+uses the server-side broker callback. The synthetic credential exists only in
+that trusted callback; the persisted receipt records the destination ID,
+resolved path, revisions, and credential reference, but never a credential,
+request payload, or protected content. The adapter is deterministic and local:
+it performs no external network call and makes no network-isolation claim. A
+same-request terminal replay returns the stored safe summary without creating a
+second receipt.
+
+## Bouncer v5: deterministic risk and temporary JIT elevation
+
+`bouncer-v5` keeps persistent Agent enrollment separate from exceptional
 authority. Effective team-file authority is the intersection of:
 
 ```text
@@ -137,27 +173,42 @@ The resulting JIT capability is bound to one human, Agent, Run, request ID,
 action, resource, canonical payload digest, optional destination,
 grant/bundle, policy revision, resource revision, and effective scope. It
 expires, is revocable, is consumed once, and does not turn a persistent viewer
-grant into an editor grant.
+grant into an editor grant. The existing restricted asset publish/export paths
+remain single-owner high-risk flows; criticality is reserved for deterministic
+sensitive broad/external or cross-region cases.
+
+### Risk outcomes and dual control
+
+The pure `risk-v1` engine consumes only backend-derived facts. It rejects
+unknown actions, classifications, destinations, environments, audiences,
+reach, asset types, regions, or revisions. Low-risk actions proceed under the
+existing persistent authorization. Medium and high risk require one eligible
+owner authority. Critical risk requires two distinct eligible humans and the
+exact roles `owner` plus `independent_reviewer`; the second approval finalizes
+one claim atomically. Approval cannot repair any hard policy denial.
 
 ## Revocation, replay, and final recheck
 
 Owner Run revocation invalidates the runtime credential and pending/approved
-capability claims. Agent Team Grant and protected-resource revision revocation
-likewise invalidate related claims. `RuntimeGateway` serializes protected
-execution and re-resolves mutable authority immediately before capability use
-and again adjacent to the registered protected side effect. This blocks a
-queued initial allow after authority has changed. Stored execution records make
-same-request retries idempotent and reject payload/destination/request
-substitution conflicts.
+capability claims. Agent Team Grant, protected-resource revision, and
+registered-destination revision/revocation likewise invalidate related claims.
+`RuntimeGateway` serializes protected execution and re-resolves mutable
+authority immediately before capability use and again adjacent to the
+registered protected side effect. The local destination adapter repeats the
+destination/resource check inside the serialized store mutation before the
+broker callback. This blocks a queued initial allow after authority has
+changed. Stored execution records make same-request retries idempotent and
+reject payload/destination/request substitution conflicts.
 
 ## Audit and Delegation Receipt
 
 `AuditService` records redacted decision evidence: Human, Agent, Run, action,
-resource ID, team/grant/bundle metadata, decision/reason, approval/capability
-status, policy version, enforcement point, and whether the protected side
-effect executed. The Web Delegation Receipt is a safe human-readable view of
-that evidence. Neither surface includes a raw runtime credential, API key, or
-protected payload.
+resource ID, team/grant/bundle metadata, risk tier/version and facts digest,
+approval count/roles and safe approval decisions, decision/reason,
+approval/capability status, policy version, enforcement point, and whether the
+protected side effect executed. The Web Delegation Receipt is a safe
+human-readable view of that evidence. Neither surface includes a raw runtime
+credential, API key, payload, or protected content.
 
 ## Security Lab
 

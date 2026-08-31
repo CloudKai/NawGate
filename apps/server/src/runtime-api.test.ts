@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { ApprovalService } from "./agentgate/approval-service.js";
 import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
@@ -10,6 +11,10 @@ import { ProtectedResourceService } from "./agentgate/protected-resource-service
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
 import { SecurityLabService } from "./agentgate/security-lab-service.js";
+import { DestinationCatalogueService } from "./agentgate/destination-catalogue.js";
+import { LocalDestinationAdapter } from "./agentgate/local-destination-adapter.js";
+import { ServerSideCredentialBroker } from "./agentgate/destination-broker.js";
+import { CONTENT_DESTINATIONS } from "./agentgate/content-model.js";
 import { createApp, type RuntimeApiDependencies } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { AgentService } from "./agent-service.js";
@@ -45,13 +50,18 @@ afterEach(async () => {
 });
 
 async function makeRuntimeApp(
-  options: { securityLabEnabled?: boolean } = {},
+  options: {
+    securityLabEnabled?: boolean;
+    destinationCredentials?: ReadonlyMap<string, string>;
+    loggerStream?: PassThrough;
+  } = {},
 ): Promise<{
   app: Awaited<ReturnType<typeof createApp>>;
   runtime: RuntimeApiDependencies;
   resources: ProtectedResourceService;
   store: JsonStore;
   grants: AgentTeamGrantService;
+  root: string;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), "agentgate-runtime-api-test-"));
   temporaryDirectories.push(root);
@@ -90,7 +100,13 @@ async function makeRuntimeApp(
   });
   const audit = new AuditService(store);
   const approvals = new ApprovalService(store, audit);
-  const resources = new ProtectedResourceService(store);
+  const destinations = new DestinationCatalogueService(store, approvals);
+  const destinationAdapter = new LocalDestinationAdapter(
+    store,
+    destinations,
+    new ServerSideCredentialBroker(options.destinationCredentials),
+  );
+  const resources = new ProtectedResourceService(store, approvals, destinationAdapter);
   const credentials = new RuntimeCredentialService();
   const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
   const gateway = new RuntimeGateway(
@@ -102,6 +118,7 @@ async function makeRuntimeApp(
     undefined,
     grants,
     credentials,
+    destinations,
   );
   const runtime: RuntimeApiDependencies = {
     credentials,
@@ -120,9 +137,10 @@ async function makeRuntimeApp(
     service,
     undefined,
     runtime,
+    options.loggerStream,
   );
   applications.push(app);
-  return { app, runtime, resources, store, grants };
+  return { app, runtime, resources, store, grants, root };
 }
 
 function runtimeHeaders(token: string) {
@@ -130,6 +148,135 @@ function runtimeHeaders(token: string) {
 }
 
 describe("Runtime API boundary", () => {
+  it("keeps destination secret canaries out of application logs, HTTP, workspace, and receipts", async () => {
+    const canary = "DESTINATION_SECRET_CANARY_HTTP_LOG_WORKSPACE_RECEIPT";
+    const successLog = new PassThrough();
+    const successLogChunks: Buffer[] = [];
+    successLog.on("data", (chunk: Buffer) => successLogChunks.push(chunk));
+    const success = await makeRuntimeApp({
+      destinationCredentials: new Map([
+        ["credential-ref:tiktok:brand-sg", canary],
+      ]),
+      loggerStream: successLog,
+    });
+    const registeredAgent = success.store.snapshot().agents.find(
+      (agent) => agent.id === agentAId,
+    );
+    if (!registeredAgent) throw new Error("Expected registered Agent A");
+    const workspacePath = registeredAgent.workspacePath;
+    await mkdir(workspacePath, { recursive: true });
+    await writeFile(path.join(workspacePath, "AGENTS.md"), "Platform-managed workspace rules.\n", "utf8");
+
+    const session = await success.app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
+    const headers = {
+      authorization: "Bearer outer-token-for-tests",
+      "x-agentgate-session": sessionToken,
+    };
+    const runtime = success.runtime.credentials.issue(agentAId, runAId, "user-a");
+    const publish = {
+      requestId: "00000000-0000-4000-8000-000000000010",
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserA,
+      payload: {
+        purpose: "creator_requested_publish",
+        organizationId: "org-user-a",
+        businessCenterId: "business-center-user-a",
+        accountId: "account-user-a",
+        assetId: "asset-user-a-video-1",
+        contentVersion: "v1",
+      },
+    };
+    const pending = await success.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-agentgate-runtime": runtime.token },
+      payload: publish,
+    });
+    expect(pending.statusCode).toBe(202);
+    expect(pending.body).not.toContain(canary);
+    const approvalId = (pending.json() as { approvalId: string }).approvalId;
+    const approved = await success.app.inject({
+      method: "POST",
+      url: "/api/approvals/" + approvalId + "/approve",
+      headers,
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.body).not.toContain(canary);
+    const completed = await success.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-agentgate-runtime": runtime.token },
+      payload: { ...publish, approvalId },
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.body).not.toContain(canary);
+
+    const workspaceEvidence = await Promise.all(
+      (await readdir(workspacePath)).map(async (name) => readFile(path.join(workspacePath, name), "utf8")),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(workspaceEvidence.join("\n")).not.toContain(canary);
+    expect(successLogChunks.join("")).not.toContain(canary);
+    expect(JSON.stringify(success.store.snapshot())).not.toContain(canary);
+
+    const failureLog = new PassThrough();
+    const failureLogChunks: Buffer[] = [];
+    failureLog.on("data", (chunk: Buffer) => failureLogChunks.push(chunk));
+    const failure = await makeRuntimeApp({
+      destinationCredentials: new Map(),
+      loggerStream: failureLog,
+    });
+    const failureSession = await failure.app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: { authorization: "Bearer outer-token-for-tests" },
+      payload: { userId: "user-a" },
+    });
+    const failureSessionToken = (failureSession.json() as { sessionToken: string }).sessionToken;
+    const failureRuntime = failure.runtime.credentials.issue(
+      agentAId,
+      "00000000-0000-4000-8000-000000000011",
+      "user-a",
+    );
+    const failurePending = await failure.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-agentgate-runtime": failureRuntime.token },
+      payload: { ...publish, requestId: "00000000-0000-4000-8000-000000000012" },
+    });
+    const failureApprovalId = (failurePending.json() as { approvalId: string }).approvalId;
+    await failure.app.inject({
+      method: "POST",
+      url: "/api/approvals/" + failureApprovalId + "/approve",
+      headers: {
+        authorization: "Bearer outer-token-for-tests",
+        "x-agentgate-session": failureSessionToken,
+      },
+    });
+    const failed = await failure.app.inject({
+      method: "POST",
+      url: "/api/runtime/actions",
+      headers: { "x-agentgate-runtime": failureRuntime.token },
+      payload: {
+        ...publish,
+        requestId: "00000000-0000-4000-8000-000000000012",
+        approvalId: failureApprovalId,
+      },
+    });
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).not.toContain(canary);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(failureLogChunks.join("")).not.toContain(canary);
+    expect(JSON.stringify(failure.store.snapshot())).not.toContain(canary);
+  });
+
   it("does not register Security Lab endpoints unless explicitly enabled", async () => {
     const { app } = await makeRuntimeApp({ securityLabEnabled: false });
     const session = await app.inject({
@@ -188,7 +335,7 @@ describe("Runtime API boundary", () => {
       decision: "allow",
       reasonCode: "protected_action_succeeded",
       protectedActionExecuted: true,
-      policyVersion: "bouncer-v4",
+      policyVersion: "bouncer-v5",
     });
     expect(JSON.stringify(result.json())).not.toContain("Synthetic profile for project-a");
     expect(resources.getExecutionCount("resource.read", "project-a")).toBe(1);

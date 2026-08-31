@@ -1,6 +1,6 @@
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
-export type HumanId = "user-a" | "user-b";
+export type HumanId = "user-a" | "user-b" | "user-c";
 
 export interface HumanPrincipal {
   id: HumanId;
@@ -91,12 +91,14 @@ export interface ApprovalRecord {
     | "content.publish"
     | "content.export";
   resourceId: string;
-  risk: "high";
+  risk: "low" | "medium" | "high" | "critical";
   reasonCode: string;
   status: "pending" | "approved" | "denied" | "expired" | "consumed" | "revoked";
   createdAt: string;
   decidedAt: string | null;
   expiresAt: string;
+  destination: string | null;
+  destinationRevision: number | null;
   grantId?: string;
   teamId?: "team-alpha" | "team-beta";
   bundleVersion?: number;
@@ -105,6 +107,21 @@ export interface ApprovalRecord {
   agentRole?: "viewer" | "editor" | "admin";
   resourceClassification?: "internal" | "sensitive" | "restricted";
   temporaryScope?: string[];
+  requesterHumanId: HumanId;
+  riskVersion: string;
+  riskFactsDigest: string;
+  requiredApprovalCount: number;
+  requiredApprovalRoles: ("owner" | "independent_reviewer")[];
+  approvalDecisions: {
+    humanId: HumanId;
+    authorityId: string;
+    authorityRevision: number;
+    role: "owner" | "independent_reviewer";
+    decision: "approve" | "deny";
+    decidedAt: string;
+  }[];
+  organizationId: string;
+  accountId: string | null;
 }
 
 export interface AuditEvent {
@@ -127,7 +144,7 @@ export interface AuditEvent {
     | null;
   resourceId: string | null;
   decision: "allow" | "deny" | "require_approval" | null;
-  risk: "low" | "medium" | "high" | null;
+  risk: "low" | "medium" | "high" | "critical" | null;
   reasonCode: string | null;
   approvalId: string | null;
   capabilityId: string | null;
@@ -146,6 +163,11 @@ export interface AuditEvent {
   resourceClassification: "internal" | "sensitive" | "restricted" | null;
   temporaryScope: string[] | null;
   rejectedFieldNames: string[] | null;
+  riskVersion: string | null;
+  riskFactsDigest: string | null;
+  requiredApprovalCount: number | null;
+  requiredApprovalRoles: ("owner" | "independent_reviewer")[] | null;
+  approvalDecisions: ApprovalRecord["approvalDecisions"] | null;
 }
 
 export type SecurityLabScenario =

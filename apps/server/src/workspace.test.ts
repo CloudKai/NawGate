@@ -41,5 +41,6 @@ describe("WorkspaceManager", () => {
     expect(instructions).toContain("agentctl file read <resource-id>");
     expect(instructions).toContain("agentctl deploy production");
     expect(instructions).toContain("Never print credentials or environment variables.");
+    expect(instructions).not.toContain("SYNTHETIC_DESTINATION_SECRET_CANARY");
   });
 });

@@ -21,12 +21,10 @@ export const CONTENT_ACTIONS: readonly ContentAction[] = [
 ];
 
 export const CONTENT_DESTINATIONS = {
-  analytics: "analytics:account-user-a",
-  analyticsUserB: "analytics:account-user-b",
-  publishUserA: "tiktok:publish:account-user-a",
-  publishUserB: "tiktok:publish:account-user-b",
-  archiveUserA: "compliance:archive:org-user-a",
-  archiveUserB: "compliance:archive:org-user-b",
+  publishUserA: "tiktok-account:brand-sg",
+  publishUserB: "tiktok-account:creator-demo",
+  analytics: "analytics:approved-dashboard",
+  archiveUserA: "archive:compliance-store",
 } as const;
 
 const payloadKeys = [
@@ -80,33 +78,6 @@ export function parseContentActionBinding(payload: unknown): ContentActionBindin
   };
 }
 
-export function expectedContentDestination(
-  action: ContentAction,
-  accountId: string,
-  organizationId: string,
-): string | null {
-  if (action === "content.publish") {
-    if (accountId === "account-user-a") return CONTENT_DESTINATIONS.publishUserA;
-    if (accountId === "account-user-b") return CONTENT_DESTINATIONS.publishUserB;
-    return null;
-  }
-  if (action === "content.disclose") {
-    if (accountId === "account-user-a") return CONTENT_DESTINATIONS.analytics;
-    if (accountId === "account-user-b") return CONTENT_DESTINATIONS.analyticsUserB;
-    return null;
-  }
-  if (action === "content.export") {
-    if (organizationId === "org-user-a") return CONTENT_DESTINATIONS.archiveUserA;
-    if (organizationId === "org-user-b") return CONTENT_DESTINATIONS.archiveUserB;
-    return null;
-  }
-  return null;
-}
-
-export function isKnownContentDestination(value: unknown): value is string {
-  return Object.values(CONTENT_DESTINATIONS).includes(value as (typeof CONTENT_DESTINATIONS)[keyof typeof CONTENT_DESTINATIONS]);
-}
-
 export function demoContentScopes(humanId: HumanId): ContentScopeGrant[] {
   if (humanId === "user-a") {
     return [{
@@ -121,15 +92,5 @@ export function demoContentScopes(humanId: HumanId): ContentScopeGrant[] {
       destinations: [CONTENT_DESTINATIONS.analytics],
     }];
   }
-  return [{
-    id: "content-scope-user-b-approved-analytics",
-    humanId,
-    organizationId: "org-user-b",
-    businessCenterId: "business-center-user-b",
-    accountId: "account-user-b",
-    assetIds: ["asset-user-b-video-1"],
-    allowedActions: ["content.disclose"],
-    allowedPurposes: ["approved_analytics"],
-    destinations: [CONTENT_DESTINATIONS.analyticsUserB],
-  }];
+  return [];
 }

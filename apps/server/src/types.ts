@@ -4,9 +4,12 @@ import type {
   AuditEvent,
   DeploymentState,
   HumanId,
+  ApprovalAuthority,
   ProtectedResource,
   AgentTeamGrant,
   TeamMembership,
+  RegisteredDestination,
+  DestinationSideEffectReceipt,
 } from "./agentgate/types.js";
 
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
@@ -56,7 +59,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 5;
+  version: 7;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -68,6 +71,9 @@ export interface Database {
   teamMemberships: TeamMembership[];
   agentTeamGrants: AgentTeamGrant[];
   capabilityClaims: import("./agentgate/types.js").CapabilityClaim[];
+  registeredDestinations: RegisteredDestination[];
+  destinationReceipts: DestinationSideEffectReceipt[];
+  approvalAuthorities: ApprovalAuthority[];
 }
 
 export interface CreateAgentInput {

@@ -12,6 +12,16 @@ import {
   isContentAction,
   parseContentActionBinding,
 } from "./content-model.js";
+import {
+  isRegisteredDestination,
+  type DestinationCatalogueService,
+} from "./destination-catalogue.js";
+import {
+  DeterministicRiskEngine,
+  type RiskAssessment,
+  type RiskEngine,
+  type RiskFacts,
+} from "./risk-engine.js";
 import { TeamMembershipService, type MembershipResolver } from "./team-membership-service.js";
 import type { JsonStore } from "../store.js";
 import type {
@@ -21,6 +31,7 @@ import type {
   AuditDecision,
   GatewayRequest,
   GatewayResult,
+  GatewayDenyReasonCode,
   PolicyEngine,
   PolicyActionAttributes,
   PolicyDecision,
@@ -29,8 +40,13 @@ import type {
   TeamMembership,
   TrustedRuntimeContext,
   TeamId,
+  RegisteredDestination,
+  ApprovalAuthorityRole,
+  ApprovalDecision,
+  RiskTier,
 } from "./types.js";
-import { AGENTGATE_POLICY_VERSION } from "./types.js";
+import { AGENTGATE_POLICY_VERSION, AGENTGATE_RISK_VERSION } from "./types.js";
+import type { Database } from "../types.js";
 
 interface ProtectedResourceBoundary {
   getMetadata(resourceId: string): ProtectedResource | null;
@@ -44,6 +60,18 @@ interface ProtectedResourceBoundary {
       destination: string | null;
       policyRevision: string;
       resourceRevision: number;
+      destinationRevision: number | null;
+      contentPurpose: import("./types.js").ContentPurpose | null;
+      finalRecheck?: (database: Database) => void | Promise<void>;
+      requesterHumanId?: import("./types.js").HumanId;
+      organizationId?: string;
+      accountId?: string | null;
+      risk?: RiskTier;
+      riskVersion?: string;
+      riskFactsDigest?: string;
+      requiredApprovalCount?: number | null;
+      requiredApprovalRoles?: ApprovalAuthorityRole[] | null;
+      approvalDecisions?: ApprovalDecision[] | null;
     },
   ): Promise<ProtectedActionResult>;
 }
@@ -62,6 +90,13 @@ interface PendingDemoBarrier {
   reached(): void;
   released: Promise<void>;
   release(): void;
+}
+
+class FinalRecheckError extends Error {
+  constructor(public readonly reasonCode: GatewayDenyReasonCode) {
+    super(reasonCode);
+    this.name = "FinalRecheckError";
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,13 +160,22 @@ function environmentFor(action: string): "local" | "staging" | "production" {
   return "local";
 }
 
-function policyActionAttributes(request: GatewayRequest): PolicyActionAttributes {
+function policyActionAttributes(
+  request: GatewayRequest,
+  destinations?: DestinationCatalogueService,
+  registeredDestinationOverride?: RegisteredDestination | null,
+): PolicyActionAttributes {
   if (!isContentAction(request.action)) return { name: request.action };
   const contentBinding = parseContentActionBinding(request.payload);
   return {
     name: request.action,
     ...(contentBinding ? { contentBinding } : {}),
     destination: request.destination ?? null,
+    ...(request.destination && registeredDestinationOverride !== undefined
+      ? { registeredDestination: registeredDestinationOverride }
+      : request.destination && destinations
+        ? { registeredDestination: destinations.get(request.destination) }
+      : {}),
   };
 }
 
@@ -139,12 +183,30 @@ function auditDecisionFor(outcome: PolicyDecision["outcome"]): AuditDecision {
   return outcome;
 }
 
-function riskFor(action: AgentGateAction): "low" | "medium" | "high" {
+function riskFor(action: AgentGateAction): RiskTier {
   if (action === "resource.read") return "low";
   if (action === "content.moderate") return "low";
   if (action === "content.disclose") return "medium";
   if (action === "content.publish" || action === "content.export") return "high";
   return action === "deploy.production" ? "high" : "medium";
+}
+
+function approvalRequirement(risk: RiskTier): {
+  count: number;
+  roles: ApprovalAuthorityRole[];
+} {
+  return risk === "critical"
+    ? { count: 2, roles: ["owner", "independent_reviewer"] }
+    : { count: 1, roles: ["owner"] };
+}
+
+function organizationAndAccount(resource: ProtectedResource, humanId: string): {
+  organizationId: string;
+  accountId: string | null;
+} {
+  return resource.type === "content_asset"
+    ? { organizationId: resource.organizationId, accountId: resource.accountId }
+    : { organizationId: `org-${humanId}`, accountId: null };
 }
 
 function explanationFor(
@@ -240,6 +302,39 @@ function explanationFor(
   if (reasonCode === "content_destination_mismatch") {
     return "The content destination does not match the registered account or organisation scope.";
   }
+  if (reasonCode === "content_destination_revoked") {
+    return "The registered content destination is revoked; no downstream credential was released.";
+  }
+  if (reasonCode === "content_destination_disabled") {
+    return "The registered content destination is disabled; no downstream credential was released.";
+  }
+  if (reasonCode === "content_destination_action_mismatch") {
+    return "The registered content destination does not permit this exact action.";
+  }
+  if (reasonCode === "content_destination_purpose_mismatch") {
+    return "The registered content destination does not permit this declared purpose.";
+  }
+  if (reasonCode === "content_destination_tenant_mismatch") {
+    return "The registered content destination belongs to a different organisation, business centre, or account.";
+  }
+  if (reasonCode === "destination_revision_changed") {
+    return "The registered destination changed after authorization; the stale capability was not executed.";
+  }
+  if (reasonCode === "risk_facts_malformed") {
+    return "The backend could not establish a complete trusted risk-facts binding; the protected action was denied.";
+  }
+  if (reasonCode === "risk_facts_changed") {
+    return "The trusted risk facts changed after authorization; the protected action was not executed.";
+  }
+  if (reasonCode === "approval_authority_revoked") {
+    return "An approval authority changed before execution; the protected action was not executed.";
+  }
+  if (reasonCode === "risk_requires_dual_control") {
+    return "This critical action requires one owner and one independent reviewer approval.";
+  }
+  if (reasonCode === "risk_requires_owner_approval") {
+    return "This action's deterministic risk tier requires explicit owner approval before execution.";
+  }
   if (reasonCode === "content_publish_requires_owner_approval") {
     return "Publishing content is high risk and requires explicit owner approval before the protected side effect.";
   }
@@ -271,6 +366,8 @@ export class RuntimeGateway {
     private readonly memberships: MembershipResolver = new TeamMembershipService(store),
     private readonly grants: AgentGrantResolver = new AgentTeamGrantService(store),
     private readonly authority?: RuntimeAuthorityResolver,
+    private readonly destinations?: DestinationCatalogueService,
+    private readonly riskEngine: RiskEngine = new DeterministicRiskEngine(),
   ) {}
 
   /**
@@ -365,6 +462,41 @@ export class RuntimeGateway {
       };
     }
 
+    // A completed execution is a historical result, not a request to perform
+    // the protected side effect again. Resolve exact replay before current
+    // destination policy so rotation/revocation cannot turn a safe terminal
+    // retry into a new denial or a second adapter call.
+    if (isRegisteredAction(request.action)) {
+      const historicalExecution = this.findExecution(context.runId, request.requestId);
+      if (historicalExecution) {
+        if (!this.executionMatchesRequest(historicalExecution, request, payloadDigest)) {
+          return {
+            status: "conflict",
+            requestId: request.requestId,
+            action: request.action,
+            resourceId: request.resourceId,
+            reasonCode: "idempotency_mismatch",
+          };
+        }
+        if (
+          isContentAction(request.action) &&
+          request.action !== "content.moderate" &&
+          (historicalExecution.destinationRevision === null ||
+            !Number.isInteger(historicalExecution.destinationRevision) ||
+            historicalExecution.destinationRevision <= 0)
+        ) {
+          return {
+            status: "conflict",
+            requestId: request.requestId,
+            action: request.action,
+            resourceId: request.resourceId,
+            reasonCode: "idempotency_mismatch",
+          };
+        }
+        return this.replayExecution(historicalExecution);
+      }
+    }
+
     const resource = this.resources.getMetadata(request.resourceId);
     if (!resource) {
       await this.recordPolicyDecision(
@@ -398,20 +530,19 @@ export class RuntimeGateway {
         contentScopes: demoContentScopes(context.humanId),
       },
       object: { resource },
-      action: policyActionAttributes(request),
+      action: policyActionAttributes(request, this.destinations),
       environment: { name: environmentFor(request.action) },
     });
-    await this.recordPolicyDecision(
-      context,
-      request,
-      resource,
-      decision,
-      startedAt,
-      grants,
-      memberships,
-    );
-
     if (decision.outcome === "deny") {
+      await this.recordPolicyDecision(
+        context,
+        request,
+        resource,
+        decision,
+        startedAt,
+        grants,
+        memberships,
+      );
       return {
         status: "denied",
         requestId: request.requestId,
@@ -421,18 +552,64 @@ export class RuntimeGateway {
       };
     }
 
+    const initialRisk = this.assessRisk(request, resource);
+    if (initialRisk.outcome === "deny") {
+      const riskDecision: PolicyDecision = {
+        outcome: "deny",
+        risk: "critical",
+        reasonCode: "malformed_attributes",
+      };
+      await this.recordPolicyDecision(
+        context,
+        request,
+        resource,
+        riskDecision,
+        startedAt,
+        grants,
+        memberships,
+        initialRisk,
+        "risk_facts_malformed",
+      );
+      return {
+        status: "denied",
+        requestId: request.requestId,
+        action: request.action,
+        resourceId: request.resourceId,
+        reasonCode: "risk_facts_malformed",
+      };
+    }
+    await this.recordPolicyDecision(
+      context,
+      request,
+      resource,
+      decision,
+      startedAt,
+      grants,
+      memberships,
+      initialRisk,
+    );
+
     return this.serializeExecution(async () => {
       let capabilityResourceRevision: number | undefined;
+      let capabilityDestinationRevision: number | undefined;
+      let approvalRequestForExecution: (ApprovalRequest & { approvalId: string }) | undefined;
       const existing = this.findExecution(context.runId, request.requestId);
       if (existing) {
+        if (!this.executionMatchesRequest(existing, request, payloadDigest)) {
+          return {
+            status: "conflict",
+            requestId: request.requestId,
+            action: request.action,
+            resourceId: request.resourceId,
+            reasonCode: "idempotency_mismatch",
+          };
+        }
         if (
-          existing.action !== request.action ||
-          existing.resourceId !== request.resourceId ||
-          existing.payloadDigest === null ||
-          existing.destination !== (request.destination ?? null) ||
-          existing.payloadDigest !== payloadDigest ||
-          existing.policyRevision === null ||
-          existing.resourceRevision === null
+          isContentAction(request.action) &&
+          request.action !== "content.moderate" &&
+          (existing.destinationRevision === null ||
+            !Number.isInteger(existing.destinationRevision) ||
+            existing.destinationRevision <= 0)
         ) {
           return {
             status: "conflict",
@@ -500,7 +677,7 @@ export class RuntimeGateway {
           contentScopes: demoContentScopes(context.humanId),
         },
         object: { resource: finalResource },
-        action: policyActionAttributes(request),
+        action: policyActionAttributes(request, this.destinations),
         environment: { name: environmentFor(request.action) },
       });
       if (finalDecision.outcome === "deny") {
@@ -522,8 +699,43 @@ export class RuntimeGateway {
         };
       }
       const currentDecision = finalDecision;
+      const currentRisk = this.assessRisk(request, finalResource);
+      if (currentRisk.outcome === "deny") {
+        const riskDecision: PolicyDecision = {
+          outcome: "deny",
+          risk: "critical",
+          reasonCode: "malformed_attributes",
+        };
+        await this.recordPolicyDecision(
+          context,
+          request,
+          finalResource,
+          riskDecision,
+          startedAt,
+          finalGrants,
+          finalMemberships,
+          currentRisk,
+          "risk_facts_malformed",
+        );
+        return {
+          status: "denied",
+          requestId: request.requestId,
+          action: request.action,
+          resourceId: request.resourceId,
+          reasonCode: "risk_facts_malformed",
+        };
+      }
+      const effectiveRisk = currentRisk.riskTier;
+      const needsApproval = currentDecision.outcome === "require_approval" || effectiveRisk !== "low";
+      const requirement = approvalRequirement(effectiveRisk);
 
-      if (currentDecision.outcome === "require_approval") {
+      if (needsApproval) {
+        const approvalReason: Extract<GatewayResult, { status: "approval_required" }>['reasonCode'] = currentDecision.outcome === "require_approval"
+          ? currentDecision.reasonCode
+          : effectiveRisk === "critical"
+            ? "risk_requires_dual_control"
+            : "risk_requires_owner_approval";
+        const scope = organizationAndAccount(finalResource, context.humanId);
         const approvalRequest: ApprovalRequest = {
           humanId: context.humanId,
           agentId: context.agentId,
@@ -531,17 +743,27 @@ export class RuntimeGateway {
           requestId: request.requestId,
           action: request.action,
           resourceId: request.resourceId,
-          reasonCode: currentDecision.reasonCode,
+          reasonCode: approvalReason,
           payload: request.payload,
           destination: request.destination ?? null,
           policyRevision: AGENTGATE_POLICY_VERSION,
           resourceRevision: finalResource.revision,
+          destinationRevision: isContentAction(request.action) && request.action !== "content.moderate"
+            ? this.destinations?.get(request.destination ?? "")?.revision ?? null
+            : null,
           ...this.grantEvidence(
             finalResource,
             finalGrants,
             finalMemberships,
-            currentDecision.reasonCode === "restricted_file_requires_temporary_elevation",
+            approvalReason === "restricted_file_requires_temporary_elevation",
           ),
+          risk: effectiveRisk,
+          riskVersion: currentRisk.riskVersion,
+          riskFactsDigest: currentRisk.factsDigest,
+          requiredApprovalCount: requirement.count,
+          requiredApprovalRoles: requirement.roles,
+          organizationId: scope.organizationId,
+          accountId: scope.accountId,
         };
         if (!request.approvalId) {
           try {
@@ -570,8 +792,10 @@ export class RuntimeGateway {
               action: request.action,
               resourceId: request.resourceId,
               approvalId: approval.id,
-              risk: currentDecision.risk,
-              reasonCode: currentDecision.reasonCode,
+              risk: approval.risk,
+              reasonCode: approvalReason,
+              requiredApprovalCount: approval.requiredApprovalCount,
+              requiredApprovalRoles: [...approval.requiredApprovalRoles],
             };
           } catch (error) {
             if (error instanceof ApprovalError && error.code === "IDEMPOTENCY_MISMATCH") {
@@ -598,8 +822,10 @@ export class RuntimeGateway {
             action: request.action,
             resourceId: request.resourceId,
             approvalId: consumption.approval.id,
-            risk: currentDecision.risk,
-            reasonCode: currentDecision.reasonCode,
+            risk: consumption.approval.risk,
+            reasonCode: approvalReason,
+            requiredApprovalCount: consumption.approval.requiredApprovalCount,
+            requiredApprovalRoles: [...consumption.approval.requiredApprovalRoles],
           };
         }
         if (consumption.status === "denied") {
@@ -633,7 +859,12 @@ export class RuntimeGateway {
           };
         }
         request = { ...request, approvalId: consumption.capability.approvalId };
+        approvalRequestForExecution = {
+          ...approvalRequest,
+          approvalId: consumption.capability.approvalId,
+        };
         capabilityResourceRevision = consumption.capability.resourceRevision;
+        capabilityDestinationRevision = consumption.capability.destinationRevision ?? undefined;
       }
 
       return this.executeProtected(
@@ -642,6 +873,9 @@ export class RuntimeGateway {
         startedAt,
         payloadDigest,
         capabilityResourceRevision,
+        capabilityDestinationRevision,
+        currentRisk,
+        approvalRequestForExecution,
       );
     });
   }
@@ -652,6 +886,9 @@ export class RuntimeGateway {
     startedAt: number,
     payloadDigest: string,
     capabilityResourceRevision?: number,
+    capabilityDestinationRevision?: number,
+    expectedRisk?: Extract<RiskAssessment, { outcome: "allow" }>,
+    approvalRequest?: ApprovalRequest & { approvalId: string },
   ): Promise<GatewayResult> {
     // This is intentionally a second policy boundary immediately adjacent to
     // the side effect. The earlier decision may have waited on the execution
@@ -693,7 +930,7 @@ export class RuntimeGateway {
         contentScopes: demoContentScopes(context.humanId),
       },
       object: { resource },
-      action: policyActionAttributes(request),
+      action: policyActionAttributes(request, this.destinations),
       environment: { name: environmentFor(request.action) },
     });
     if (finalDecision.outcome === "deny") {
@@ -738,6 +975,106 @@ export class RuntimeGateway {
         memberships,
       );
     }
+    let latestDestinationRevision: number | null = null;
+    if (isContentAction(request.action) && request.action !== "content.moderate") {
+      const latestDestination = this.destinations?.get(request.destination ?? "");
+      if (!latestDestination) {
+        return this.deniedAfterFinalRecheck(
+          context,
+          request,
+          latestResource,
+          grants,
+          { outcome: "deny", risk: "high", reasonCode: "content_destination_unknown" },
+          startedAt,
+          memberships,
+        );
+      }
+      if (latestDestination.status !== "enabled") {
+        return this.deniedAfterFinalRecheck(
+          context,
+          request,
+          latestResource,
+          grants,
+          { outcome: "deny", risk: "high", reasonCode: "content_destination_revoked" },
+          startedAt,
+          memberships,
+        );
+      }
+      if (
+        capabilityDestinationRevision !== undefined &&
+        latestDestination.revision !== capabilityDestinationRevision
+      ) {
+        return this.deniedAfterFinalRecheck(
+          context,
+          request,
+          latestResource,
+          grants,
+          { outcome: "deny", risk: "high", reasonCode: "destination_revision_changed" },
+          startedAt,
+          memberships,
+        );
+      }
+      latestDestinationRevision = latestDestination.revision;
+    }
+    const latestRisk = this.assessRisk(
+      request,
+      latestResource,
+      isContentAction(request.action) && request.action !== "content.moderate"
+        ? this.destinations?.get(request.destination ?? "") ?? undefined
+        : undefined,
+    );
+    if (latestRisk.outcome === "deny") {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        latestResource,
+        grants,
+        { outcome: "deny", risk: "critical", reasonCode: "malformed_attributes" },
+        startedAt,
+        memberships,
+        latestRisk,
+        "risk_facts_malformed",
+      );
+    }
+    if (
+      expectedRisk &&
+      (latestRisk.riskTier !== expectedRisk.riskTier ||
+        latestRisk.riskVersion !== expectedRisk.riskVersion ||
+        latestRisk.factsDigest !== expectedRisk.factsDigest)
+    ) {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        latestResource,
+        grants,
+        { outcome: "deny", risk: latestRisk.riskTier, reasonCode: "malformed_attributes" },
+        startedAt,
+        memberships,
+        latestRisk,
+        "risk_facts_changed",
+      );
+    }
+    if (approvalRequest && !this.approvals.isConsumedClaimValid(approvalRequest)) {
+      return this.deniedAfterFinalRecheck(
+        context,
+        request,
+        latestResource,
+        grants,
+        { outcome: "deny", risk: latestRisk.riskTier, reasonCode: "malformed_attributes" },
+        startedAt,
+        memberships,
+        latestRisk,
+        "approval_authority_revoked",
+      );
+    }
+    const finalRecheck = this.createFinalRecheck(
+      context,
+      request,
+      latestResource,
+      latestDestinationRevision,
+      expectedRisk ?? latestRisk,
+      approvalRequest,
+    );
     try {
       const result = await this.resources.execute(request.action, request.resourceId, {
         runId: context.runId,
@@ -746,6 +1083,20 @@ export class RuntimeGateway {
         destination: request.destination ?? null,
         policyRevision: AGENTGATE_POLICY_VERSION,
         resourceRevision: latestResource.revision,
+        destinationRevision: latestDestinationRevision,
+        contentPurpose: isContentAction(request.action)
+          ? parseContentActionBinding(request.payload)?.purpose ?? null
+          : null,
+        finalRecheck,
+        requesterHumanId: context.humanId,
+        organizationId: organizationAndAccount(latestResource, context.humanId).organizationId,
+        accountId: organizationAndAccount(latestResource, context.humanId).accountId,
+        risk: latestRisk.riskTier,
+        riskVersion: latestRisk.riskVersion,
+        riskFactsDigest: latestRisk.factsDigest,
+        requiredApprovalCount: approvalRequest?.requiredApprovalCount ?? null,
+        requiredApprovalRoles: approvalRequest?.requiredApprovalRoles ?? null,
+        approvalDecisions: this.approvalDecisionsFor(request.approvalId),
       });
       await this.audit.record({
         eventType: "protected_action.succeeded",
@@ -756,7 +1107,7 @@ export class RuntimeGateway {
         action: request.action,
         resourceId: request.resourceId,
         decision: "allow",
-        risk: riskFor(request.action),
+        risk: latestRisk.riskTier,
         reasonCode: "protected_action_succeeded",
         approvalId: request.approvalId ?? null,
         capabilityId: null,
@@ -766,6 +1117,15 @@ export class RuntimeGateway {
         explanation: "The RuntimeGateway authorized and completed the protected action.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: true,
+        riskVersion: latestRisk.riskVersion,
+        riskFactsDigest: latestRisk.factsDigest,
+        ...(approvalRequest
+          ? {
+              requiredApprovalCount: approvalRequest.requiredApprovalCount ?? null,
+              requiredApprovalRoles: approvalRequest.requiredApprovalRoles ?? null,
+              approvalDecisions: this.approvalDecisionsFor(request.approvalId),
+            }
+          : {}),
         ...this.grantEvidence(resource, grants, memberships, Boolean(request.approvalId)),
       });
       return {
@@ -775,7 +1135,20 @@ export class RuntimeGateway {
         resourceId: request.resourceId,
         result,
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof FinalRecheckError) {
+        return this.deniedAfterFinalRecheck(
+          context,
+          request,
+          latestResource,
+          grants,
+          { outcome: "deny", risk: latestRisk.riskTier, reasonCode: "malformed_attributes" },
+          startedAt,
+          memberships,
+          latestRisk,
+          error.reasonCode,
+        );
+      }
       await this.store.mutate((database) => {
         database.actionExecutions.push({
           runId: context.runId,
@@ -786,6 +1159,16 @@ export class RuntimeGateway {
           destination: request.destination ?? null,
           policyRevision: AGENTGATE_POLICY_VERSION,
           resourceRevision: latestResource.revision,
+          destinationRevision: latestDestinationRevision,
+          requesterHumanId: context.humanId,
+          organizationId: organizationAndAccount(latestResource, context.humanId).organizationId,
+          accountId: organizationAndAccount(latestResource, context.humanId).accountId,
+          risk: latestRisk.riskTier,
+          riskVersion: latestRisk.riskVersion,
+          riskFactsDigest: latestRisk.factsDigest,
+          requiredApprovalCount: approvalRequest?.requiredApprovalCount ?? null,
+          requiredApprovalRoles: approvalRequest?.requiredApprovalRoles ?? null,
+          approvalDecisions: this.approvalDecisionsFor(request.approvalId),
           status: "failed",
           resultSummary: { summary: "Protected action failed" },
           completedAt: new Date().toISOString(),
@@ -800,7 +1183,7 @@ export class RuntimeGateway {
         action: request.action,
         resourceId: request.resourceId,
         decision: "allow",
-        risk: riskFor(request.action),
+        risk: latestRisk.riskTier,
         reasonCode: "protected_action_failed",
         approvalId: request.approvalId ?? null,
         capabilityId: null,
@@ -810,6 +1193,15 @@ export class RuntimeGateway {
         explanation: "Authorization passed, but the protected action failed during execution.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: false,
+        riskVersion: latestRisk.riskVersion,
+        riskFactsDigest: latestRisk.factsDigest,
+        ...(approvalRequest
+          ? {
+              requiredApprovalCount: approvalRequest.requiredApprovalCount ?? null,
+              requiredApprovalRoles: approvalRequest.requiredApprovalRoles ?? null,
+              approvalDecisions: this.approvalDecisionsFor(request.approvalId),
+            }
+          : {}),
         ...this.grantEvidence(resource, grants, memberships, Boolean(request.approvalId)),
       });
       return {
@@ -834,6 +1226,171 @@ export class RuntimeGateway {
     this.demoBarriers.delete(key);
   }
 
+  private assessRisk(
+    request: GatewayRequest,
+    resource: ProtectedResource,
+    destination?: RegisteredDestination,
+  ): RiskAssessment {
+    const resolvedDestination = destination ?? (
+      isContentAction(request.action) && request.action !== "content.moderate"
+        ? this.destinations?.get(request.destination ?? "") ?? undefined
+        : undefined
+    );
+    return this.riskEngine.assess(this.buildRiskFacts(request, resource, resolvedDestination));
+  }
+
+  private buildRiskFacts(
+    request: GatewayRequest,
+    resource: ProtectedResource,
+    destination?: RegisteredDestination,
+  ): RiskFacts | null {
+    const destinationId = request.destination ?? null;
+    if (isContentAction(request.action)) {
+      if (
+        resource.type !== "content_asset" ||
+        resource.assetType !== "short_video" ||
+        (resource.sourceRegion !== "SG" && resource.sourceRegion !== "GLOBAL")
+      ) {
+        return null;
+      }
+      if (request.action === "content.moderate") {
+        if (destinationId !== null) return null;
+        return {
+          action: request.action,
+          resourceClassification: resource.classification,
+          destinationId: null,
+          destinationEnvironment: "local",
+          destinationAudience: "owner",
+          destinationReach: "narrow",
+          assetType: "short_video",
+          sourceRegion: resource.sourceRegion,
+          destinationRegion: null,
+          resourceRevision: resource.revision,
+          destinationRevision: null,
+        };
+      }
+      if (
+        !destination ||
+        destination.id !== destinationId ||
+        !isRegisteredDestination(destination)
+      ) {
+        return null;
+      }
+      return {
+        action: request.action,
+        resourceClassification: resource.classification,
+        destinationId: destination.id,
+        destinationEnvironment: destination.environment,
+        destinationAudience: destination.audience,
+        destinationReach: destination.reach,
+        assetType: "short_video",
+        sourceRegion: resource.sourceRegion,
+        destinationRegion: destination.region,
+        resourceRevision: resource.revision,
+        destinationRevision: destination.revision,
+      };
+    }
+    const destinationEnvironment = environmentFor(request.action);
+    return {
+      action: request.action,
+      resourceClassification: resource.classification,
+      destinationId: null,
+      destinationEnvironment,
+      destinationAudience: resource.type === "team_file" ? "team" : "owner",
+      destinationReach: "narrow",
+      assetType: resource.type === "content_asset" ? "short_video" : resource.type,
+      sourceRegion: "GLOBAL",
+      destinationRegion: null,
+      resourceRevision: resource.revision,
+      destinationRevision: null,
+    };
+  }
+
+  private policyDecisionFromDatabase(
+    context: TrustedRuntimeContext,
+    request: GatewayRequest,
+    resource: ProtectedResource,
+    database: Database,
+  ): Promise<PolicyDecision> {
+    const registeredDestination = request.destination
+      ? database.registeredDestinations.find(
+          (candidate) => candidate.id === request.destination && isRegisteredDestination(candidate),
+        ) ?? null
+      : undefined;
+    return this.policy.evaluate({
+      requestId: request.requestId,
+      subject: {
+        humanId: context.humanId,
+        agentId: context.agentId,
+        runId: context.runId,
+        memberships: database.teamMemberships.filter((membership) => membership.humanId === context.humanId),
+        agentGrants: database.agentTeamGrants.filter((grant) => grant.agentId === context.agentId),
+        contentScopes: demoContentScopes(context.humanId),
+      },
+      object: { resource },
+      action: policyActionAttributes(request, undefined, registeredDestination),
+      environment: { name: environmentFor(request.action) },
+    });
+  }
+
+  private createFinalRecheck(
+    context: TrustedRuntimeContext,
+    request: GatewayRequest,
+    expectedResource: ProtectedResource,
+    expectedDestinationRevision: number | null,
+    expectedRisk: Extract<RiskAssessment, { outcome: "allow" }>,
+    approvalRequest?: ApprovalRequest & { approvalId: string },
+  ): (database: Database) => Promise<void> {
+    return async (database) => {
+      if (this.authority && !this.authority.isAuthorityActive(context)) {
+        throw new FinalRecheckError("runtime_authority_revoked");
+      }
+      const currentResource = database.protectedResources.find(
+        (candidate) => candidate.id === expectedResource.id,
+      );
+      if (!currentResource || currentResource.revision !== expectedResource.revision) {
+        throw new FinalRecheckError("resource_revision_changed");
+      }
+      const hasRegisteredDestination = isContentAction(request.action) && request.action !== "content.moderate" && Boolean(request.destination);
+      const currentDestination = hasRegisteredDestination
+        ? database.registeredDestinations.find(
+            (candidate) => candidate.id === request.destination && isRegisteredDestination(candidate),
+          )
+        : undefined;
+      if (
+        hasRegisteredDestination &&
+        (!currentDestination || currentDestination.revision !== expectedDestinationRevision)
+      ) {
+        throw new FinalRecheckError("destination_revision_changed");
+      }
+      const policyDecision = await this.policyDecisionFromDatabase(
+        context,
+        request,
+        currentResource,
+        database,
+      );
+      if (policyDecision.outcome === "deny") {
+        throw new FinalRecheckError(policyDecision.reasonCode);
+      }
+      const currentRisk = this.riskEngine.assess(
+        this.buildRiskFacts(request, currentResource, currentDestination),
+      );
+      if (currentRisk.outcome === "deny") {
+        throw new FinalRecheckError("risk_facts_malformed");
+      }
+      if (
+        currentRisk.riskTier !== expectedRisk.riskTier ||
+        currentRisk.riskVersion !== expectedRisk.riskVersion ||
+        currentRisk.factsDigest !== expectedRisk.factsDigest
+      ) {
+        throw new FinalRecheckError("risk_facts_changed");
+      }
+      if (approvalRequest && !this.approvals.isConsumedClaimValid(approvalRequest)) {
+        throw new FinalRecheckError("approval_authority_revoked");
+      }
+    };
+  }
+
   private demoBarrierKey(runId: string, requestId: string): string {
     return `${runId}\u0000${requestId}`;
   }
@@ -846,6 +1403,8 @@ export class RuntimeGateway {
     decision: Extract<PolicyDecision, { outcome: "deny" }>,
     startedAt: number,
     memberships: readonly TeamMembership[] = [],
+    riskAssessment?: RiskAssessment,
+    reasonCodeOverride?: GatewayDenyReasonCode,
   ): Promise<GatewayResult> {
     await this.recordPolicyDecision(
       context,
@@ -855,13 +1414,15 @@ export class RuntimeGateway {
       startedAt,
       grants,
       memberships,
+      riskAssessment,
+      reasonCodeOverride,
     );
     return {
       status: "denied",
       requestId: request.requestId,
       action: request.action,
       resourceId: request.resourceId,
-      reasonCode: decision.reasonCode,
+      reasonCode: reasonCodeOverride ?? decision.reasonCode,
     };
   }
 
@@ -872,6 +1433,22 @@ export class RuntimeGateway {
         .actionExecutions.find(
           (execution) => execution.runId === runId && execution.requestId === requestId,
         ) ?? null
+    );
+  }
+
+  private executionMatchesRequest(
+    execution: ActionExecutionRecord,
+    request: GatewayRequest,
+    payloadDigest: string,
+  ): boolean {
+    return (
+      execution.action === request.action &&
+      execution.resourceId === request.resourceId &&
+      execution.payloadDigest !== null &&
+      execution.destination === (request.destination ?? null) &&
+      execution.payloadDigest === payloadDigest &&
+      execution.policyRevision !== null &&
+      execution.resourceRevision !== null
     );
   }
 
@@ -900,6 +1477,12 @@ export class RuntimeGateway {
       : "Protected action completed";
   }
 
+  private approvalDecisionsFor(approvalId: string | undefined): ApprovalDecision[] | null {
+    if (!approvalId) return null;
+    const approval = this.store.snapshot().approvals.find((candidate) => candidate.id === approvalId);
+    return approval ? approval.approvalDecisions.map((decision) => ({ ...decision })) : null;
+  }
+
   private async recordPolicyDecision(
     context: TrustedRuntimeContext,
     request: GatewayRequest,
@@ -908,12 +1491,32 @@ export class RuntimeGateway {
     startedAt: number,
     grants: readonly AgentTeamGrant[] = [],
     memberships: readonly TeamMembership[] = [],
+    riskAssessment?: RiskAssessment,
+    reasonCodeOverride?: string,
   ): Promise<void> {
+    const riskRequiresApproval =
+      riskAssessment?.outcome === "allow" && riskAssessment.riskTier !== "low";
+    const requiresApproval = decision.outcome === "require_approval" || riskRequiresApproval;
+    const recordedOutcome: PolicyDecision["outcome"] = requiresApproval
+      ? "require_approval"
+      : decision.outcome;
+    const recordedReasonCode =
+      reasonCodeOverride ??
+      (riskRequiresApproval
+        ? riskAssessment.riskTier === "critical"
+          ? "risk_requires_dual_control"
+          : "risk_requires_owner_approval"
+        : decision.reasonCode);
+    const approvalEvidence =
+      riskAssessment?.outcome === "allow" &&
+      (requiresApproval)
+        ? approvalRequirement(riskAssessment.riskTier)
+        : null;
     await this.audit.record({
       eventType:
-        decision.outcome === "allow"
+        recordedOutcome === "allow"
           ? "policy.allow"
-          : decision.outcome === "deny"
+          : recordedOutcome === "deny"
             ? "policy.deny"
             : "policy.approval_required",
       humanId: context.humanId,
@@ -922,27 +1525,31 @@ export class RuntimeGateway {
       requestId: request.requestId,
       action: isRegisteredAction(request.action) ? request.action : null,
       resourceId: resource?.id ?? null,
-      decision: auditDecisionFor(decision.outcome),
-      risk: decision.risk,
-      reasonCode: decision.reasonCode,
+      decision: auditDecisionFor(recordedOutcome),
+      risk: riskAssessment?.outcome === "allow" ? riskAssessment.riskTier : decision.risk,
+      reasonCode: recordedReasonCode,
       approvalId: null,
       capabilityId: null,
       status:
-        decision.outcome === "require_approval"
+        recordedOutcome === "require_approval"
           ? "pending"
-          : decision.outcome === "deny"
+          : recordedOutcome === "deny"
             ? "failure"
             : "success",
       durationMs: Date.now() - startedAt,
       policyVersion: AGENTGATE_POLICY_VERSION,
-      explanation: explanationFor(context, request, resource, decision.reasonCode),
+      explanation: explanationFor(context, request, resource, recordedReasonCode),
       enforcementPoint: "RuntimeGateway",
       protectedActionExecuted: false,
+      riskVersion: riskAssessment?.riskVersion ?? null,
+      riskFactsDigest: riskAssessment?.factsDigest ?? null,
+      requiredApprovalCount: approvalEvidence?.count ?? null,
+      requiredApprovalRoles: approvalEvidence?.roles ?? null,
       ...this.grantEvidence(
         resource,
         grants,
         memberships,
-        decision.reasonCode === "restricted_file_requires_temporary_elevation",
+        recordedReasonCode === "restricted_file_requires_temporary_elevation",
       ),
     });
   }

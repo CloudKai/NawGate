@@ -26,6 +26,28 @@ owner-approval and durable one-use capability flow, with exact payload and
 destination binding. All destinations and adapters are local synthetic values;
 there are no external TikTok calls or arbitrary URLs.
 
+## Server-owned registered destinations
+
+Content destinations are stable IDs, not caller-supplied URLs or credentials.
+The v7 JSON store persists the catalogue records for
+`tiktok-account:brand-sg`, `tiktok-account:creator-demo`,
+`analytics:approved-dashboard`, and `archive:compliance-store`. A record
+binds its organisation/business-centre/account tenant, allowed action and
+purpose, local HTTPS route metadata, classification, status, revision, and
+credential reference. `RuntimeGateway` resolves the record from this
+catalogue; the policy has no static destination fallback, and missing or
+malformed server resolution fails closed.
+
+The server-side broker keeps synthetic credential values in process and passes
+one only to the trusted local adapter callback. The adapter performs the final
+destination and protected-resource revision check inside the serialized store
+mutation before that callback, then persists only a safe side-effect receipt.
+Receipt metadata includes the destination ID, resolved route, revisions, and
+credential reference; it excludes credentials, payloads, and protected
+content. Destination revision changes or revocation invalidate related pending
+and approved claims. This is a deterministic local adapter, not an external
+TikTok integration or a network-isolation control.
+
 ## Durable payload-bound capability claims
 
 Approval records and non-secret one-use capability claims are stored in the
@@ -38,6 +60,26 @@ reconstruct an approved claim, while concurrent consumers still get one use.
 
 The v4-to-v5 migration terminalizes approval/action records that lack the new
 binding and drops unbound claims, so legacy state cannot regain authority.
+The v5-to-v6 migration adds the destination catalogue and safe receipt store;
+malformed v6 destination metadata or receipts are rejected rather than
+silently restored. The v6-to-v7 migration adds backend-owned approval
+authorities, risk/dual-control bindings, and terminalizes legacy approvals or
+claims that cannot prove the new exact binding. V7 also requires explicit
+trusted content asset risk metadata and valid destination audience, reach, and
+region enums; only the narrow v6 fixture migration may enrich those fields.
+
+## Deterministic risk and optional dual control
+
+`risk-v1` is a pure deterministic engine. Its facts are derived by the
+RuntimeGateway from trusted action/resource/destination metadata, including
+classification, audience/reach, asset type, source/destination region, and
+resource/destination revisions. Runtime payloads do not supply or reduce risk.
+Hard policy denials happen first. Low-risk actions retain normal authorization;
+medium/high actions require one scoped owner authority; critical sensitive
+external/broad or cross-region actions require distinct owner and independent
+reviewer authorities. The second decision atomically creates exactly one
+one-use capability. Authorities are approval-only and never grant resource
+read or ownership access.
 
 ## Provider-neutral model configuration
 

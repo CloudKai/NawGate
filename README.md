@@ -39,15 +39,20 @@ Volcengine ECS.
 - Team memberships plus persistent Team Agent grants with independent viewer,
   editor, and admin roles, action scope, optional expiry, bundle evidence, and
   explicit grant revocation
-- `bouncer-v4` deterministic policy with cross-user/cross-team hard deny,
+- `bouncer-v5` deterministic policy plus `risk-v1` tiers and optional
+  owner/independent-reviewer dual control, with cross-user/cross-team hard deny,
   trusted server-side attribute resolution, replay/idempotency protection, and
   final pre-side-effect authorization rechecks
-- Owner approval for high-risk production deploys and exact one-use JIT
+- Owner approval for medium/high actions, critical two-person approval, and exact one-use JIT
   elevation for restricted team-file reads; JIT never mutates the Agent's
   persistent viewer grant
 - Purpose-bound synthetic content actions for moderation, scoped disclosure,
   owner-approved publishing, and owner-approved compliance export across a
   deterministic organisation/business-centre/account/asset hierarchy
+- Server-owned destination catalogue with stable account/analytics/archive IDs,
+  action/purpose/tenant/classification/revision checks, and a server-side
+  synthetic credential broker feeding only a local fake adapter with safe
+  receipts; arbitrary URLs and credentials are rejected
 - Redacted audit timeline and Delegation Receipt with policy version, reason,
   enforcement point, safe authority evidence, and side-effect status
 - Local/demo-only Security Lab that exercises the real RuntimeGateway for
@@ -342,6 +347,11 @@ multi-Agent coordination, or hardened multi-tenant container isolation.
 Protected payloads are intentionally outside Agent workspaces, audit storage,
 and Delegation Receipts. The raw short-lived runtime credential is never shown
 in the Web UI, receipt, audit, or Security Lab result.
+
+Content destination receipts contain only safe route metadata, destination and
+resource revisions, and credential references. The local adapter makes no
+external call and does not claim network isolation; destination revision or
+revocation invalidates pending and approved claims.
 
 ## Validation
 

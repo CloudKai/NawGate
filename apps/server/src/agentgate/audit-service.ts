@@ -10,6 +10,8 @@ import type {
   TeamId,
   TeamRole,
   ResourceClassification,
+  ApprovalAuthorityRole,
+  ApprovalDecision,
 } from "./types.js";
 import { AGENTGATE_POLICY_VERSION } from "./types.js";
 import { JsonStore } from "../store.js";
@@ -42,6 +44,11 @@ export interface AuditEventInput {
   resourceClassification?: ResourceClassification | null;
   temporaryScope?: string[] | null;
   rejectedFieldNames?: string[] | null;
+  riskVersion?: string | null;
+  riskFactsDigest?: string | null;
+  requiredApprovalCount?: number | null;
+  requiredApprovalRoles?: ApprovalAuthorityRole[] | null;
+  approvalDecisions?: ApprovalDecision[] | null;
 }
 
 export class AuditService {
@@ -63,9 +70,21 @@ export class AuditService {
         : "unknown";
     const event: AuditEvent = {
       id: randomUUID(),
+      eventType: input.eventType,
       createdAt: this.now(),
-      ...input,
+      humanId: input.humanId,
+      agentId: input.agentId,
+      runId: input.runId,
+      requestId: input.requestId,
+      action: input.action,
       resourceId: safeResourceId,
+      decision: input.decision,
+      risk: input.risk,
+      reasonCode: input.reasonCode,
+      approvalId: input.approvalId,
+      capabilityId: input.capabilityId,
+      status: input.status,
+      durationMs: input.durationMs,
       policyVersion:
         input.policyVersion ??
         (input.eventType.startsWith("policy.") ? AGENTGATE_POLICY_VERSION : null),
@@ -81,6 +100,13 @@ export class AuditService {
       resourceClassification: input.resourceClassification ?? null,
       temporaryScope: input.temporaryScope ?? null,
       rejectedFieldNames: input.rejectedFieldNames ? [...input.rejectedFieldNames] : null,
+      riskVersion: input.riskVersion ?? null,
+      riskFactsDigest: input.riskFactsDigest ?? null,
+      requiredApprovalCount: input.requiredApprovalCount ?? null,
+      requiredApprovalRoles: input.requiredApprovalRoles ? [...input.requiredApprovalRoles] : null,
+      approvalDecisions: input.approvalDecisions
+        ? input.approvalDecisions.map((decision) => ({ ...decision }))
+        : null,
     };
     await this.store.mutate((database) => {
       database.auditEvents.push(event);

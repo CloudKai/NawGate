@@ -1,9 +1,8 @@
 import {
-  expectedContentDestination,
   isContentAction,
   isContentPurpose,
-  isKnownContentDestination,
 } from "./content-model.js";
+import { isRegisteredDestination, isRegisteredDestinationId } from "./destination-catalogue.js";
 import { isHumanId, isTeamId, isTeamRole } from "./demo-users.js";
 import type {
   AgentGateAction,
@@ -93,7 +92,7 @@ function isValidContentScope(value: unknown, humanId: string): value is ContentS
     value.allowedPurposes.every((purpose) => purpose === "approved_analytics") &&
     Array.isArray(value.destinations) &&
     value.destinations.length > 0 &&
-    value.destinations.every((destination) => isKnownContentDestination(destination))
+    value.destinations.every((destination) => isRegisteredDestinationId(destination))
   );
 }
 
@@ -205,6 +204,9 @@ function isValidAttributeShape(input: unknown): input is PolicyInput {
     (action.destination !== undefined &&
       action.destination !== null &&
       !isNonEmptyString(action.destination)) ||
+    (action.registeredDestination !== undefined &&
+      action.registeredDestination !== null &&
+      !isRegisteredDestination(action.registeredDestination)) ||
     !isKnownEnvironment(environment.name)
   ) {
     return false;
@@ -371,7 +373,7 @@ function contentDecision(input: PolicyInput): PolicyDecision {
       return {
         outcome: "deny",
         risk: "high",
-        reasonCode: isKnownContentDestination(destination)
+        reasonCode: input.action.registeredDestination
           ? "content_destination_mismatch"
           : "content_destination_unknown",
       };
@@ -379,16 +381,38 @@ function contentDecision(input: PolicyInput): PolicyDecision {
     return { outcome: "allow", risk: "low", reasonCode: "content_moderation_allowed" };
   }
 
-  const expectedDestination = expectedContentDestination(
-    action as "content.disclose" | "content.publish" | "content.export",
-    resource.accountId,
-    resource.organizationId,
-  );
-  if (!isKnownContentDestination(destination)) {
+  if (typeof destination !== "string") {
     return { outcome: "deny", risk: "high", reasonCode: "content_destination_unknown" };
   }
-  if (!expectedDestination || destination !== expectedDestination) {
-    return { outcome: "deny", risk: "high", reasonCode: "content_destination_mismatch" };
+  const registeredDestination = input.action.registeredDestination;
+  if (!registeredDestination || registeredDestination.id !== destination) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_unknown" };
+  }
+  if (registeredDestination.status === "disabled") {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_disabled" };
+  }
+  if (registeredDestination.status === "revoked") {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_revoked" };
+  }
+  if (!registeredDestination.allowedActions.includes(action as "content.disclose" | "content.publish" | "content.export")) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_action_mismatch" };
+  }
+  if (!registeredDestination.purposes.includes(binding.purpose)) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_purpose_mismatch" };
+  }
+  const expectedClassification = action === "content.disclose" ? "sensitive" : "restricted";
+  if (registeredDestination.classification !== expectedClassification) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_classification_mismatch" };
+  }
+  if (registeredDestination.environment !== input.environment.name) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_environment_mismatch" };
+  }
+  if (
+    registeredDestination.organizationId !== resource.organizationId ||
+    registeredDestination.businessCenterId !== resource.businessCenterId ||
+    registeredDestination.accountId !== resource.accountId
+  ) {
+    return { outcome: "deny", risk: "high", reasonCode: "content_destination_tenant_mismatch" };
   }
 
   if (action === "content.disclose") {

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DeterministicPolicyEngine } from "./policy-engine.js";
 import { demoContentScopes } from "./content-model.js";
+import { CONTENT_DESTINATIONS } from "./content-model.js";
+import { DEMO_REGISTERED_DESTINATIONS } from "./destination-catalogue.js";
 import type {
   AgentTeamGrant,
   PolicyInput,
   ProtectedResource,
+  RegisteredDestination,
   TeamMembership,
 } from "./types.js";
 
@@ -231,6 +234,7 @@ describe("DeterministicPolicyEngine", () => {
       purpose: "safety_moderation" | "approved_analytics" | "creator_requested_publish",
       destination: string | null = null,
       bindingOverrides: Record<string, unknown> = {},
+      destinationOverrides: Partial<RegisteredDestination> = {},
     ): PolicyInput => ({
       requestId: "content-request",
       subject: {
@@ -245,6 +249,16 @@ describe("DeterministicPolicyEngine", () => {
       action: {
         name: action,
         destination,
+        ...(destination
+          ? {
+              registeredDestination: structuredClone(
+                {
+                  ...(DEMO_REGISTERED_DESTINATIONS.find((candidate) => candidate.id === destination) ?? {}),
+                  ...destinationOverrides,
+                },
+              ),
+            }
+          : {}),
         contentBinding: {
           purpose,
           organizationId: "org-user-a",
@@ -265,12 +279,12 @@ describe("DeterministicPolicyEngine", () => {
     await expect(policy.evaluate(contentInput(
       "content.disclose",
       "approved_analytics",
-      "analytics:account-user-a",
+      CONTENT_DESTINATIONS.analytics,
     ))).resolves.toMatchObject({ outcome: "allow", reasonCode: "content_disclosure_allowed" });
     await expect(policy.evaluate(contentInput(
       "content.publish",
       "creator_requested_publish",
-      "tiktok:publish:account-user-a",
+      CONTENT_DESTINATIONS.publishUserA,
     ))).resolves.toMatchObject({
       outcome: "require_approval",
       reasonCode: "content_publish_requires_owner_approval",
@@ -282,15 +296,50 @@ describe("DeterministicPolicyEngine", () => {
     await expect(policy.evaluate(contentInput(
       "content.disclose",
       "approved_analytics",
-      "analytics:account-user-a",
+      CONTENT_DESTINATIONS.analytics,
       { assetId: "asset-user-a-video-2" },
     ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_asset_mismatch" });
     await expect(policy.evaluate(contentInput(
       "content.disclose",
       "approved_analytics",
-      "analytics:account-user-a",
+      CONTENT_DESTINATIONS.analytics,
       { contentVersion: "v2" },
     ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_version_mismatch" });
+    await expect(policy.evaluate(contentInput(
+      "content.disclose",
+      "approved_analytics",
+      CONTENT_DESTINATIONS.analytics,
+      {},
+      { status: "disabled" },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_destination_disabled" });
+    await expect(policy.evaluate(contentInput(
+      "content.publish",
+      "creator_requested_publish",
+      CONTENT_DESTINATIONS.publishUserA,
+      {},
+      { purposes: ["approved_analytics"] },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_destination_purpose_mismatch" });
+    await expect(policy.evaluate(contentInput(
+      "content.publish",
+      "creator_requested_publish",
+      CONTENT_DESTINATIONS.publishUserA,
+      {},
+      { classification: "sensitive" },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_destination_classification_mismatch" });
+    await expect(policy.evaluate(contentInput(
+      "content.publish",
+      "creator_requested_publish",
+      CONTENT_DESTINATIONS.publishUserA,
+      {},
+      { environment: "staging" },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_destination_environment_mismatch" });
+    await expect(policy.evaluate(contentInput(
+      "content.publish",
+      "creator_requested_publish",
+      CONTENT_DESTINATIONS.publishUserA,
+      {},
+      { organizationId: "org-user-b" },
+    ))).resolves.toMatchObject({ outcome: "deny", reasonCode: "content_destination_tenant_mismatch" });
   });
 
   it("fails closed on unknown teams, malformed attributes, and action/resource mismatch", async () => {

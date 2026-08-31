@@ -3,17 +3,67 @@ import type {
   HumanPrincipal,
   ProtectedResource,
   TeamMembership,
+  ApprovalAuthority,
 } from "./types.js";
 
 export const DEMO_USERS: readonly HumanPrincipal[] = [
   { id: "user-a", name: "User A" },
   { id: "user-b", name: "User B" },
+  { id: "user-c", name: "User C · Org A Reviewer" },
 ];
 
 export const DEMO_TEAM_MEMBERSHIPS: readonly TeamMembership[] = [
   { teamId: "team-alpha", humanId: "user-a", role: "admin" },
   { teamId: "team-alpha", humanId: "user-b", role: "viewer" },
   { teamId: "team-beta", humanId: "user-b", role: "editor" },
+];
+
+export const DEMO_APPROVAL_AUTHORITIES: readonly ApprovalAuthority[] = [
+  {
+    id: "approval-authority:user-a:owner",
+    humanId: "user-a",
+    organizationId: "org-user-a",
+    accountId: null,
+    allowedActions: ["deploy.staging", "deploy.production", "content.disclose", "content.publish", "content.export", "file.read"],
+    allowedRiskTiers: ["medium", "high", "critical"],
+    role: "owner",
+    status: "active",
+    revision: 1,
+    createdAt: "2026-08-30T00:00:00.000Z",
+    updatedAt: "2026-08-30T00:00:00.000Z",
+    revokedAt: null,
+    revocationReason: null,
+  },
+  {
+    id: "approval-authority:user-c:org-a-reviewer",
+    humanId: "user-c",
+    organizationId: "org-user-a",
+    accountId: "account-user-a",
+    allowedActions: ["content.publish", "content.export"],
+    allowedRiskTiers: ["critical"],
+    role: "independent_reviewer",
+    status: "active",
+    revision: 1,
+    createdAt: "2026-08-30T00:00:00.000Z",
+    updatedAt: "2026-08-30T00:00:00.000Z",
+    revokedAt: null,
+    revocationReason: null,
+  },
+  {
+    id: "approval-authority:user-b:owner",
+    humanId: "user-b",
+    organizationId: "org-user-b",
+    accountId: null,
+    allowedActions: ["content.publish", "content.export"],
+    allowedRiskTiers: ["high"],
+    role: "owner",
+    status: "active",
+    revision: 1,
+    createdAt: "2026-08-30T00:00:00.000Z",
+    updatedAt: "2026-08-30T00:00:00.000Z",
+    revokedAt: null,
+    revocationReason: null,
+  },
 ];
 
 export const DEMO_PROTECTED_RESOURCES: readonly ProtectedResource[] = [
@@ -83,6 +133,8 @@ export const DEMO_PROTECTED_RESOURCES: readonly ProtectedResource[] = [
     accountId: "account-user-a",
     assetId: "asset-user-a-video-1",
     contentVersion: "v1",
+    assetType: "short_video",
+    sourceRegion: "SG",
   },
   {
     id: "asset-user-a-video-2",
@@ -95,6 +147,8 @@ export const DEMO_PROTECTED_RESOURCES: readonly ProtectedResource[] = [
     accountId: "account-user-a",
     assetId: "asset-user-a-video-2",
     contentVersion: "v1",
+    assetType: "short_video",
+    sourceRegion: "SG",
   },
   {
     id: "asset-user-b-video-1",
@@ -107,6 +161,8 @@ export const DEMO_PROTECTED_RESOURCES: readonly ProtectedResource[] = [
     accountId: "account-user-b",
     assetId: "asset-user-b-video-1",
     contentVersion: "v1",
+    assetType: "short_video",
+    sourceRegion: "SG",
   },
 ];
 

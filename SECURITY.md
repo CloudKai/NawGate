@@ -11,7 +11,7 @@ credentials, personal data, or exploit details in an issue.
 
 ## Known limitations
 
-- Demo User A/User B identities and backend Agent ownership are implemented for
+- Demo User A/User B/User C identities and backend Agent ownership are implemented for
   the AgentGate proof of concept; this is not production tenant isolation or
   an enterprise IAM system.
 - Team memberships and roles are deterministic demo fixtures reseeded in the
@@ -27,6 +27,9 @@ credentials, personal data, or exploit details in an issue.
 - Explicit owner revocation invalidates active Run credentials and pending or
   approved one-use capabilities. It does not promise to terminate an
   arbitrary internal process already running in a container.
+- Risk tiers and approval authorities are deterministic local demo policy. The
+  critical path requires distinct scoped owner and independent-reviewer
+  authorities; this is not a replacement for production identity governance.
 - Runtime credential redaction is exact-token best effort; use the disposable
   container Runtime for protected-action demonstrations.
 - The Security Lab is an explicitly enabled local/demo helper that invokes the
@@ -34,7 +37,12 @@ credentials, personal data, or exploit details in an issue.
   default and is not a substitute for production test tooling.
 - TikTok-oriented content actions are deterministic synthetic adapters only;
   they make no external TikTok calls, accept no arbitrary URLs, and should not
-  be treated as a production content platform integration.
+  be treated as a production content platform integration. Destination
+  credentials are synthetic broker values used only by the trusted local fake
+  adapter; safe receipts store references, never credential values or content.
+  The adapter does not claim network isolation. Destination status/revision
+  changes invalidate related approval claims and are rechecked before the
+  adapter callback.
 - No CSRF protection
 - No per-Agent container boundary in ECS mode
 - Ordinary local containers, not hardened multi-tenant sandboxes

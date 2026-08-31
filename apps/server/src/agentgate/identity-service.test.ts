@@ -16,7 +16,7 @@ describe("IdentityService", () => {
     let currentTime = 1_000;
     const identity = new IdentityService(() => currentTime, 10_000);
 
-    expect(() => identity.createSession("user-c")).toThrowError("Unknown demo user");
+    expect(() => identity.createSession("unknown-user")).toThrowError("Unknown demo user");
     expect(identity.resolveSession("random-token")).toBeNull();
 
     const session = identity.createSession("user-b");

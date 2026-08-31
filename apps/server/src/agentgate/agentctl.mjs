@@ -37,6 +37,13 @@ const contentCommands = {
   export: { action: "content.export", purpose: "compliance_archive", destinationFor: "archive" },
 };
 
+const contentDestinations = {
+  analytics: "analytics:approved-dashboard",
+  publishUserA: "tiktok-account:brand-sg",
+  publishUserB: "tiktok-account:creator-demo",
+  archive: "archive:compliance-store",
+};
+
 function usage() {
   process.stderr.write(
     "Usage: agentctl resource read <resource-id> | agentctl file read <resource-id> | agentctl deploy <staging|production> | agentctl content <moderate|disclose|publish|export> <asset-id>\n",
@@ -76,16 +83,16 @@ function parseCommand(args) {
     let destination;
     if (definition.destinationFor === "analytics") {
       destination = asset.accountId === "account-user-a"
-        ? "analytics:account-user-a"
-        : "analytics:account-user-b";
+        ? contentDestinations.analytics
+        : null;
     } else if (definition.destinationFor === "publish") {
       destination = asset.accountId === "account-user-a"
-        ? "tiktok:publish:account-user-a"
-        : "tiktok:publish:account-user-b";
+        ? contentDestinations.publishUserA
+        : contentDestinations.publishUserB;
     } else if (definition.destinationFor === "archive") {
       destination = asset.organizationId === "org-user-a"
-        ? "compliance:archive:org-user-a"
-        : "compliance:archive:org-user-b";
+        ? contentDestinations.archive
+        : null;
     }
     return {
       action: definition.action,

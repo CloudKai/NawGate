@@ -1,6 +1,7 @@
 import path from "node:path";
 import { AgentService } from "./agent-service.js";
 import { ApprovalService } from "./agentgate/approval-service.js";
+import { ApprovalAuthorityService } from "./agentgate/approval-authority-service.js";
 import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
 import { AuditService } from "./agentgate/audit-service.js";
 import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
@@ -8,6 +9,9 @@ import { ProtectedResourceService } from "./agentgate/protected-resource-service
 import { IdentityService } from "./agentgate/identity-service.js";
 import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
+import { DestinationCatalogueService } from "./agentgate/destination-catalogue.js";
+import { ServerSideCredentialBroker } from "./agentgate/destination-broker.js";
+import { LocalDestinationAdapter } from "./agentgate/local-destination-adapter.js";
 import { SecurityLabService } from "./agentgate/security-lab-service.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
@@ -22,9 +26,16 @@ const store = new JsonStore(path.join(config.dataDirectory, "launchpad.json"));
 const workspaces = new WorkspaceManager(config.workspaceRoot);
 const audit = new AuditService(store);
 const approvals = new ApprovalService(store, audit);
+const authorities = new ApprovalAuthorityService(store, approvals, audit);
 const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
-const resources = new ProtectedResourceService(store, approvals);
+const destinations = new DestinationCatalogueService(store, approvals);
+const destinationAdapter = new LocalDestinationAdapter(
+  store,
+  destinations,
+  new ServerSideCredentialBroker(),
+);
+const resources = new ProtectedResourceService(store, approvals, destinationAdapter);
 const gateway = new RuntimeGateway(
   new DeterministicPolicyEngine(),
   resources,
@@ -34,6 +45,7 @@ const gateway = new RuntimeGateway(
   undefined,
   grants,
   credentials,
+  destinations,
 );
 const securityLab = new SecurityLabService(gateway, approvals, audit, credentials, grants);
 const runner = createRunner(config, store, { credentials, audit, approvals });
@@ -48,6 +60,7 @@ const app = await createApp(config, service, identity, {
   audit,
   grants,
   securityLab,
+  authorities,
 });
 
 const shutdown = async (signal: string) => {

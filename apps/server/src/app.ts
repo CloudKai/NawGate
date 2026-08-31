@@ -2,11 +2,13 @@ import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import { ApprovalError, ApprovalService } from "./agentgate/approval-service.js";
+import { ApprovalAuthorityService } from "./agentgate/approval-authority-service.js";
 import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
 import { AuditService } from "./agentgate/audit-service.js";
 import { IdentityService } from "./agentgate/identity-service.js";
@@ -34,8 +36,9 @@ const messageBody = z.object({
   content: z.string().trim().min(1).max(50_000),
 });
 const demoSessionBody = z.object({
-  userId: z.enum(["user-a", "user-b"]),
+  userId: z.enum(["user-a", "user-b", "user-c"]),
 }).strict();
+const emptyBody = z.object({}).strict();
 const runtimeActionBody = z.object({
   requestId: z.string().uuid(),
   action: z.enum([
@@ -81,6 +84,7 @@ export interface RuntimeApiDependencies {
   audit: AuditService;
   grants?: AgentTeamGrantService;
   securityLab?: SecurityLabService;
+  authorities?: ApprovalAuthorityService;
 }
 
 function runtimeContext(
@@ -106,7 +110,8 @@ function publicGatewayCode(reasonCode: string): string {
   if (
     reasonCode === "approval_denied" ||
     reasonCode === "capability_consumed" ||
-    reasonCode === "capability_revoked"
+    reasonCode === "capability_revoked" ||
+    reasonCode === "approval_authority_revoked"
   ) {
     return "APPROVAL_DENIED";
   }
@@ -154,6 +159,9 @@ function sendRuntimeResult(reply: {
       approvalId: result.approvalId,
       pollAfterMs: RUNTIME_POLL_AFTER_MS,
       reasonCode: result.reasonCode,
+      risk: result.risk,
+      requiredApprovalCount: result.requiredApprovalCount,
+      requiredApprovalRoles: result.requiredApprovalRoles,
     });
   }
   if (result.status === "denied") {
@@ -206,6 +214,7 @@ export async function createApp(
   service: AgentService,
   identity: IdentityService = new IdentityService(),
   runtime?: RuntimeApiDependencies,
+  loggerStream?: Writable,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -216,6 +225,7 @@ export async function createApp(
         "req.headers.x-agentgate-session",
         "req.headers.x-agentgate-runtime",
       ],
+      ...(loggerStream ? { stream: loggerStream } : {}),
     },
     bodyLimit: 1_048_576,
   });
@@ -369,6 +379,7 @@ export async function createApp(
 
     app.post("/api/approvals/:id/approve", async (request) => {
       const { id } = runtimeApprovalParams.parse(request.params);
+      if (request.body !== undefined) emptyBody.parse(request.body);
       const actor = humanActor(request);
       try {
         const result = await runtime.approvals.approve(id, actor.id);
@@ -380,6 +391,7 @@ export async function createApp(
 
     app.post("/api/approvals/:id/deny", async (request) => {
       const { id } = runtimeApprovalParams.parse(request.params);
+      if (request.body !== undefined) emptyBody.parse(request.body);
       const actor = humanActor(request);
       try {
         return { approval: await runtime.approvals.deny(id, actor.id) };

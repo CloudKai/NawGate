@@ -14,7 +14,8 @@ that can execute a protected side effect.
 - User A's Agent can read `project-a`.
 - User A's Agent cannot read `project-b`, even if an approval identifier is
   supplied.
-- Production deploy is high risk and pauses for owner approval.
+- Medium/high actions pause for one owner approval; critical actions pause for
+  two distinct approvals.
 - Approval mints an exact, one-use, short-lived capability claim. The claim is
   durably stored without a bearer secret, so a service restart reconstructs
   its safe state and concurrent consumers still get one atomic use.
@@ -25,8 +26,14 @@ that can execute a protected side effect.
 - Replays with a new request ID, expired approvals, invalid capabilities, and
   revoked Run authority fail closed without executing the protected action.
 - Every decision is redacted audit evidence. Policy decisions carry the
-  central version `bouncer-v4`, a reason explanation, and `RuntimeGateway` as
-  the enforcement point.
+  central version `bouncer-v5`, deterministic risk version `risk-v1`, a safe
+  risk-facts digest, explanation, and `RuntimeGateway` as the enforcement point.
+- Risk is assigned by a pure backend risk engine from trusted action, resource
+  classification, destination audience/reach/environment, asset type, region,
+  and resource/destination revisions. Runtime payloads cannot lower the tier.
+  The sensitive `asset-user-a-video-2` publish/export path is critical and
+  requires User A's owner authority plus the distinct Org A reviewer authority
+  held by User C. User B is not eligible for that Org A reviewer slot.
 - Protected team files require the intersection of the current human team
   relationship, a persistent administrator-approved Agent grant, the Run
   identity, and the resource role threshold. A viewer grant may request a
@@ -47,14 +54,30 @@ that can execute a protected side effect.
   `creator_requested_publish`, `approved_analytics`, and
   `compliance_archive`. Missing, unknown, mismatched, cross-business,
   cross-asset, cross-user, and unregistered-destination inputs fail closed.
+- Non-moderation content actions use the server-owned registered destination
+  catalogue. Its stable IDs are `tiktok-account:brand-sg`,
+  `tiktok-account:creator-demo`, `analytics:approved-dashboard`, and
+  `archive:compliance-store`; each record binds the owning organisation,
+  business centre, account, allowed action/purpose, local HTTPS method/host/path
+  pattern, classification, enabled/disabled/revoked status, revision, and a credential
+  reference. Requests carry only the destination ID. The persisted catalogue
+  is authoritative; there is no arbitrary URL or static fallback path.
+- The server-side credential broker injects only synthetic credentials into the
+  trusted local fake adapter. The adapter performs a serialized final
+  destination/resource revision check before credential injection and writes a
+  safe side-effect receipt containing metadata and the credential reference,
+  never the credential or protected content. Destination revision changes and
+  revocation invalidate pending/approved claims. This local adapter makes no
+  external call and does not claim network isolation.
 - Legacy approval/action records without the new exact binding are migrated to
   safe terminal/non-replayable state; unbound claims are not restored.
 
 The Delegation Receipt in the Web UI is a safe summary of the human, Agent,
 team membership role, persistent grant role/bundle, Run, temporary JIT scope,
-action, resource, risk, reason, policy version, enforcement point, timestamps,
-expiry, uses, and status. It never displays a runtime credential, API key, or
-protected resource payload.
+action, resource, risk tier/version, approval count/roles, safe approver
+identifiers, reason, policy version, enforcement point, timestamps, expiry,
+uses, and status. It never displays a runtime credential, API key, payload, or
+protected resource content.
 
 When enabled for the local POC, the Security Lab in the side panel runs
 redacted scenarios through the real RuntimeGateway: own/cross-user resources,

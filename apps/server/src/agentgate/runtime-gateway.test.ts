@@ -12,19 +12,33 @@ import { AGENTGATE_POLICY_VERSION } from "./types.js";
 import type { AgentTeamGrant } from "./types.js";
 import { RuntimeCredentialService } from "./runtime-credential-service.js";
 import type { Database } from "../types.js";
+import { DestinationCatalogueService } from "./destination-catalogue.js";
+import { LocalDestinationAdapter } from "./local-destination-adapter.js";
+import { ServerSideCredentialBroker } from "./destination-broker.js";
+import { CONTENT_DESTINATIONS } from "./content-model.js";
+import { DeterministicRiskEngine, type RiskEngine } from "./risk-engine.js";
 
 class InterleavingJsonStore extends JsonStore {
   interleaveNextMutation = false;
   interleaveResourceId = "production";
+  interleaveTarget: "resource" | "destination" = "resource";
 
   override async mutate<T>(mutation: (database: Database) => T | Promise<T>): Promise<T> {
     if (this.interleaveNextMutation) {
       this.interleaveNextMutation = false;
       await super.mutate((database) => {
+        if (this.interleaveTarget === "destination") {
+          const destination = database.registeredDestinations.find(
+            (candidate) => candidate.id === this.interleaveResourceId,
+          );
+          if (!destination) throw new Error("Expected interleaved destination");
+          destination.revision += 1;
+          return;
+        }
         const resource = database.protectedResources.find(
           (candidate) => candidate.id === this.interleaveResourceId,
         );
-        if (!resource) throw new Error("Expected production resource");
+        if (!resource) throw new Error("Expected interleaved resource");
         resource.revision += 1;
       });
     }
@@ -57,12 +71,16 @@ afterEach(async () => {
 
 async function makeGateway(
   createStore: (filePath: string) => JsonStore = (filePath) => new JsonStore(filePath),
+  includeDestinationCatalogue = true,
+  broker = new ServerSideCredentialBroker(),
+  riskEngine: RiskEngine = new DeterministicRiskEngine(),
 ): Promise<{
   gateway: RuntimeGateway;
   resources: ProtectedResourceService;
   approvals: ApprovalService;
   audit: AuditService;
   store: JsonStore;
+  destinations: DestinationCatalogueService;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), "agentgate-gateway-test-"));
   temporaryDirectories.push(root);
@@ -130,20 +148,32 @@ async function makeGateway(
     ];
     database.agentTeamGrants.push(...grants);
   });
-  const resources = new ProtectedResourceService(store);
   const audit = new AuditService(store);
   const approvals = new ApprovalService(store, audit);
+  const destinations = new DestinationCatalogueService(store, approvals);
+  const destinationAdapter = new LocalDestinationAdapter(
+    store,
+    destinations,
+    broker,
+  );
+  const contentResources = new ProtectedResourceService(store, approvals, destinationAdapter);
   return {
-    resources,
+    resources: contentResources,
     approvals,
     audit,
     store,
+    destinations,
     gateway: new RuntimeGateway(
       new DeterministicPolicyEngine(),
-      resources,
+      contentResources,
       audit,
       approvals,
       store,
+      undefined,
+      undefined,
+      undefined,
+      includeDestinationCatalogue ? destinations : undefined,
+      riskEngine,
     ),
   };
 }
@@ -215,7 +245,7 @@ describe("RuntimeGateway", () => {
       requestId: "request-content-disclose",
       action: "content.disclose",
       resourceId: "asset-user-a-video-1",
-      destination: "analytics:account-user-a",
+      destination: CONTENT_DESTINATIONS.analytics,
       payload: contentPayload({ purpose: "approved_analytics" }),
     });
     expect(disclosure).toMatchObject({ status: "success", action: "content.disclose" });
@@ -224,6 +254,21 @@ describe("RuntimeGateway", () => {
     expect(resources.getExecutionCount("content.moderate", "asset-user-a-video-1")).toBe(1);
     expect(resources.getExecutionCount("content.disclose", "asset-user-a-video-1")).toBe(1);
     expect(JSON.stringify(audit.list("agent-a"))).not.toContain("Synthetic User A short-form video payload");
+  });
+
+  it("fails closed when the RuntimeGateway has no server-resolved destination catalogue", async () => {
+    const { gateway, resources } = await makeGateway(undefined, false);
+    await expect(gateway.execute(context, {
+      requestId: "request-content-no-catalogue",
+      action: "content.disclose",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.analytics,
+      payload: contentPayload({ purpose: "approved_analytics" }),
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "content_destination_unknown",
+    });
+    expect(resources.getExecutionCount("content.disclose", "asset-user-a-video-1")).toBe(0);
   });
 
   it("strictly rejects missing or mismatched content purpose, hierarchy, scope, and destination", async () => {
@@ -286,7 +331,7 @@ describe("RuntimeGateway", () => {
           purpose: "approved_analytics",
           assetId: "asset-user-a-video-2",
         }),
-        destination: "analytics:account-user-a",
+        destination: CONTENT_DESTINATIONS.analytics,
         reasonCode: "content_scope_missing",
       },
       {
@@ -327,6 +372,82 @@ describe("RuntimeGateway", () => {
     expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(0);
   });
 
+  it("enforces registered destination action, purpose, tenant, and revocation", async () => {
+    const { gateway, destinations, resources } = await makeGateway();
+    await expect(gateway.execute(context, {
+      requestId: "request-destination-action-mismatch",
+      action: "content.disclose",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserA,
+      payload: contentPayload({ purpose: "approved_analytics" }),
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "content_destination_action_mismatch",
+    });
+
+    await expect(gateway.execute(context, {
+      requestId: "request-destination-purpose-mismatch",
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserA,
+      payload: contentPayload({ purpose: "approved_analytics" }),
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "content_purpose_mismatch",
+    });
+
+    await expect(gateway.execute(context, {
+      requestId: "request-destination-tenant-mismatch",
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserB,
+      payload: contentPayload({ purpose: "creator_requested_publish" }),
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "content_destination_tenant_mismatch",
+    });
+
+    await destinations.revoke(CONTENT_DESTINATIONS.analytics);
+    await expect(gateway.execute(context, {
+      requestId: "request-destination-revoked",
+      action: "content.disclose",
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.analytics,
+      payload: contentPayload({ purpose: "approved_analytics" }),
+    })).resolves.toMatchObject({
+      status: "denied",
+      reasonCode: "content_destination_revoked",
+    });
+    expect(resources.getExecutionCount("content.disclose", "asset-user-a-video-1")).toBe(0);
+  });
+
+  it("fails without a broker credential and leaves the destination receipt empty", async () => {
+    const { gateway, approvals, resources, store, audit } = await makeGateway(
+      undefined,
+      true,
+      new ServerSideCredentialBroker(new Map()),
+    );
+    const publish = {
+      requestId: "request-content-missing-broker-credential",
+      action: "content.publish" as const,
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserA,
+      payload: contentPayload({ purpose: "creator_requested_publish" }),
+    };
+    const pending = await gateway.execute(context, publish);
+    expect(pending).toMatchObject({ status: "approval_required" });
+    if (pending.status !== "approval_required") throw new Error("Expected publish approval");
+    await approvals.approve(pending.approvalId, "user-a");
+
+    await expect(gateway.execute(context, {
+      ...publish,
+      approvalId: pending.approvalId,
+    })).resolves.toMatchObject({ status: "failed", reasonCode: "protected_action_failed" });
+    expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(0);
+    expect(store.snapshot().destinationReceipts).toEqual([]);
+    expect(JSON.stringify(audit.list("agent-a"))).not.toContain("SYNTHETIC_DESTINATION_SECRET_CANARY");
+  });
+
   it("rejects changed protected content before creating approval", async () => {
     const { gateway, store } = await makeGateway();
     await store.mutate((database) => {
@@ -345,12 +466,12 @@ describe("RuntimeGateway", () => {
   });
 
   it("preserves exact publish and export binding through owner approval and replay", async () => {
-    const { gateway, approvals, resources } = await makeGateway();
+    const { gateway, approvals, resources, audit, store, destinations } = await makeGateway();
     const publish = {
       requestId: "request-content-publish",
       action: "content.publish" as const,
       resourceId: "asset-user-a-video-1",
-      destination: "tiktok:publish:account-user-a",
+      destination: CONTENT_DESTINATIONS.publishUserA,
       payload: contentPayload({ purpose: "creator_requested_publish" }),
     };
     const pendingPublish = await gateway.execute(context, publish);
@@ -364,23 +485,54 @@ describe("RuntimeGateway", () => {
       ...publish,
       payload: contentPayload({ purpose: "creator_requested_publish", contentVersion: "v2" }),
     })).resolves.toMatchObject({ status: "denied", reasonCode: "content_version_mismatch" });
+    const approvedPublish = await gateway.execute(context, {
+      ...publish,
+      approvalId: pendingPublish.approvalId,
+    });
+    expect(approvedPublish).toMatchObject({ status: "success" });
+    const receiptCountAfterPublish = store.snapshot().destinationReceipts.length;
     await expect(gateway.execute(context, {
       ...publish,
       approvalId: pendingPublish.approvalId,
     })).resolves.toMatchObject({ status: "success" });
+    expect(store.snapshot().destinationReceipts).toHaveLength(receiptCountAfterPublish);
+    await destinations.bumpRevision(CONTENT_DESTINATIONS.publishUserA);
     await expect(gateway.execute(context, {
       ...publish,
-      requestId: "request-content-publish-replay",
-      destination: "tiktok:publish:account-user-b",
       approvalId: pendingPublish.approvalId,
-    })).resolves.toMatchObject({ status: "denied", reasonCode: "content_destination_mismatch" });
+    })).resolves.toMatchObject({ status: "success" });
+    expect(store.snapshot().destinationReceipts).toHaveLength(receiptCountAfterPublish);
+    await destinations.revoke(CONTENT_DESTINATIONS.publishUserA);
+    await expect(gateway.execute(context, {
+      ...publish,
+      approvalId: pendingPublish.approvalId,
+    })).resolves.toMatchObject({ status: "success" });
+    expect(store.snapshot().destinationReceipts).toHaveLength(receiptCountAfterPublish);
+    const secretEvidence = JSON.stringify({
+      response: approvedPublish,
+      audit: audit.list("agent-a"),
+      persisted: store.snapshot(),
+    });
+    expect(secretEvidence).not.toContain("SYNTHETIC_DESTINATION_SECRET_CANARY");
+    expect(store.snapshot().destinationReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        destinationId: CONTENT_DESTINATIONS.publishUserA,
+        credentialRef: "credential-ref:tiktok:brand-sg",
+      }),
+    ]));
+    await expect(gateway.execute(context, {
+      ...publish,
+      requestId: "request-content-publish-substitution",
+      destination: CONTENT_DESTINATIONS.publishUserB,
+      approvalId: pendingPublish.approvalId,
+    })).resolves.toMatchObject({ status: "denied", reasonCode: "content_destination_tenant_mismatch" });
     expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(1);
 
     const exportRequest = {
       requestId: "request-content-export",
       action: "content.export" as const,
       resourceId: "asset-user-a-video-1",
-      destination: "compliance:archive:org-user-a",
+      destination: CONTENT_DESTINATIONS.archiveUserA,
       payload: contentPayload({ purpose: "compliance_archive" }),
     };
     const pendingExport = await gateway.execute(context, exportRequest);
@@ -395,6 +547,32 @@ describe("RuntimeGateway", () => {
       approvalId: pendingExport.approvalId,
     })).resolves.toMatchObject({ status: "success" });
     expect(resources.getExecutionCount("content.export", "asset-user-a-video-1")).toBe(1);
+
+    const creatorRequest = {
+      requestId: "request-content-creator-demo",
+      action: "content.publish" as const,
+      resourceId: "asset-user-b-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserB,
+      payload: contentPayload({
+        purpose: "creator_requested_publish",
+        organizationId: "org-user-b",
+        businessCenterId: "business-center-user-b",
+        accountId: "account-user-b",
+        assetId: "asset-user-b-video-1",
+      }),
+    };
+    const pendingCreator = await gateway.execute(
+      { humanId: "user-b", agentId: "agent-b", runId: "run-creator-demo" },
+      creatorRequest,
+    );
+    expect(pendingCreator).toMatchObject({ status: "approval_required" });
+    if (pendingCreator.status !== "approval_required") throw new Error("Expected creator approval");
+    await approvals.approve(pendingCreator.approvalId, "user-b");
+    await expect(gateway.execute(
+      { humanId: "user-b", agentId: "agent-b", runId: "run-creator-demo" },
+      { ...creatorRequest, approvalId: pendingCreator.approvalId },
+    )).resolves.toMatchObject({ status: "success" });
+    expect(resources.getExecutionCount("content.publish", "asset-user-b-video-1")).toBe(1);
   });
 
   it("enforces server-resolved team membership and role at the protected file boundary", async () => {
@@ -873,7 +1051,7 @@ describe("RuntimeGateway", () => {
       requestId: "request-content-atomic-revision",
       action: "content.publish" as const,
       resourceId: "asset-user-a-video-1",
-      destination: "tiktok:publish:account-user-a",
+      destination: CONTENT_DESTINATIONS.publishUserA,
       payload: contentPayload({ purpose: "creator_requested_publish" }),
     };
     const pending = await gateway.execute(context, publish);
@@ -897,35 +1075,126 @@ describe("RuntimeGateway", () => {
     );
   });
 
-  it("executes an allowed staging deploy", async () => {
-    const { gateway, resources } = await makeGateway();
-    const result = await gateway.execute(context, {
+  it("fails closed when a destination revision changes between final check and adapter receipt", async () => {
+    let interleavingStore!: InterleavingJsonStore;
+    const { gateway, resources, approvals, destinations, store } = await makeGateway((filePath) => {
+      interleavingStore = new InterleavingJsonStore(filePath);
+      return interleavingStore;
+    });
+    const originalConsume = approvals.consumeCapability.bind(approvals);
+    approvals.consumeCapability = async (request) => {
+      const result = await originalConsume(request);
+      if (result.status === "consumed") {
+        interleavingStore.interleaveResourceId = CONTENT_DESTINATIONS.publishUserA;
+        interleavingStore.interleaveTarget = "destination";
+        interleavingStore.interleaveNextMutation = true;
+      }
+      return result;
+    };
+    const publish = {
+      requestId: "request-destination-atomic-revision",
+      action: "content.publish" as const,
+      resourceId: "asset-user-a-video-1",
+      destination: CONTENT_DESTINATIONS.publishUserA,
+      payload: contentPayload({ purpose: "creator_requested_publish" }),
+    };
+    const pending = await gateway.execute(context, publish);
+    expect(pending).toMatchObject({ status: "approval_required" });
+    if (pending.status !== "approval_required") throw new Error("Expected publish approval");
+    await approvals.approve(pending.approvalId, "user-a");
+
+    await expect(gateway.execute(context, {
+      ...publish,
+      approvalId: pending.approvalId,
+    })).resolves.toMatchObject({ status: "failed", reasonCode: "protected_action_failed" });
+    expect(destinations.get(CONTENT_DESTINATIONS.publishUserA)?.revision).toBe(2);
+    expect(resources.getExecutionCount("content.publish", "asset-user-a-video-1")).toBe(0);
+    expect(store.snapshot().destinationReceipts).toEqual([]);
+    expect(store.snapshot().actionExecutions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "content.publish", status: "failed" }),
+    ]));
+  });
+
+  it("requires one owner approval for a medium-risk staging deploy", async () => {
+    const { gateway, approvals, resources } = await makeGateway();
+    const request = {
       requestId: "request-staging",
       action: "deploy.staging",
       resourceId: "staging",
+    } as const;
+    const pending = await gateway.execute(context, request);
+    expect(pending).toMatchObject({
+      status: "approval_required",
+      risk: "medium",
+      requiredApprovalCount: 1,
+      requiredApprovalRoles: ["owner"],
     });
+    if (pending.status !== "approval_required") throw new Error("Expected staging approval");
+    await approvals.approve(pending.approvalId, "user-a");
+    const result = await gateway.execute(context, { ...request, approvalId: pending.approvalId });
 
     expect(result).toMatchObject({ status: "success", action: "deploy.staging" });
     expect(resources.getExecutionCount("deploy.staging", "staging")).toBe(1);
     expect(resources.getDeploymentState("staging", "staging")?.deploymentCount).toBe(1);
   });
 
+  it("binds deployment risk facts to the actual staging or production environment", async () => {
+    const observed: unknown[] = [];
+    const delegate = new DeterministicRiskEngine();
+    const riskEngine: RiskEngine = {
+      assess(facts) {
+        observed.push(structuredClone(facts));
+        return delegate.assess(facts);
+      },
+    };
+    const { gateway } = await makeGateway(undefined, true, new ServerSideCredentialBroker(), riskEngine);
+
+    await gateway.execute(context, {
+      requestId: "request-staging-risk-environment",
+      action: "deploy.staging",
+      resourceId: "staging",
+    });
+    await gateway.execute(context, {
+      requestId: "request-production-risk-environment",
+      action: "deploy.production",
+      resourceId: "production",
+    });
+
+    expect(observed).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "deploy.staging",
+        destinationEnvironment: "staging",
+        assetType: "deployment_target",
+      }),
+      expect.objectContaining({
+        action: "deploy.production",
+        destinationEnvironment: "production",
+        assetType: "deployment_target",
+      }),
+    ]));
+  });
+
   it("serializes duplicate requests and rejects request substitution", async () => {
-    const { gateway, resources } = await makeGateway();
+    const { gateway, approvals, resources } = await makeGateway();
+    const request = {
+      requestId: "request-duplicate",
+      action: "deploy.staging" as const,
+      resourceId: "staging",
+    };
     const [first, second] = await Promise.all([
-      gateway.execute(context, {
-        requestId: "request-duplicate",
-        action: "deploy.staging",
-        resourceId: "staging",
-      }),
-      gateway.execute(context, {
-        requestId: "request-duplicate",
-        action: "deploy.staging",
-        resourceId: "staging",
-      }),
+      gateway.execute(context, request),
+      gateway.execute(context, request),
     ]);
-    expect(first).toMatchObject({ status: "success" });
-    expect(second).toMatchObject({ status: "success" });
+    expect(first).toMatchObject({ status: "approval_required" });
+    expect(second).toMatchObject({ status: "approval_required" });
+    if (first.status !== "approval_required") throw new Error("Expected duplicate approval");
+    await approvals.approve(first.approvalId, "user-a");
+    const [completed, replay] = await Promise.all([
+      gateway.execute(context, { ...request, approvalId: first.approvalId }),
+      gateway.execute(context, { ...request, approvalId: first.approvalId }),
+    ]);
+    expect(completed).toMatchObject({ status: "success" });
+    expect(replay).toMatchObject({ status: "success" });
     expect(resources.getExecutionCount("deploy.staging", "staging")).toBe(1);
 
     const mismatch = await gateway.execute(context, {

@@ -198,8 +198,53 @@ describe("durable approval claims", () => {
     }), "utf8");
     const store = new JsonStore(filePath);
     await store.initialize();
-    expect(store.snapshot().version).toBe(5);
+    expect(store.snapshot().version).toBe(7);
     expect(store.snapshot().capabilityClaims).toEqual([]);
     expect(store.snapshot().approvals[0]).toMatchObject({ status: "revoked", reasonCode: "legacy_unbound_approval" });
+  });
+
+  it("terminalizes stale destination claims during v5 to v6 restart migration", async () => {
+    const first = await makeServices();
+    const contentRequest = request({
+      action: "content.publish",
+      resourceId: "asset-user-a-video-1",
+      reasonCode: "content_publish_requires_owner_approval",
+      payload: {
+        purpose: "creator_requested_publish",
+        organizationId: "org-user-a",
+        businessCenterId: "business-center-user-a",
+        accountId: "account-user-a",
+        assetId: "asset-user-a-video-1",
+        contentVersion: "v1",
+      },
+      destination: "tiktok-account:brand-sg",
+      destinationRevision: 1,
+    });
+    const pending = await first.approvals.getOrCreate({
+      ...contentRequest,
+      requestId: "request-destination-restart-pending",
+    });
+    const approved = await first.approvals.getOrCreate({
+      ...contentRequest,
+      requestId: "request-destination-restart-approved",
+    });
+    await first.approvals.approve(approved.id, "user-a");
+    await first.store.mutate((database) => {
+      const destination = database.registeredDestinations.find(
+        (candidate) => candidate.id === "tiktok-account:brand-sg",
+      );
+      if (!destination) throw new Error("Expected destination");
+      destination.revision = 2;
+    });
+
+    const restartedStore = new JsonStore(first.filePath);
+    await restartedStore.initialize();
+    expect(restartedStore.snapshot().approvals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: pending.id, status: "revoked", reasonCode: "destination_revision_changed" }),
+      expect.objectContaining({ id: approved.id, status: "revoked", reasonCode: "destination_revision_changed" }),
+    ]));
+    expect(restartedStore.snapshot().capabilityClaims).toEqual([
+      expect.objectContaining({ approvalId: approved.id, remainingUses: 0 }),
+    ]);
   });
 });

@@ -1,4 +1,4 @@
-export type HumanId = "user-a" | "user-b";
+export type HumanId = "user-a" | "user-b" | "user-c";
 
 export type TeamId = "team-alpha" | "team-beta";
 export type TeamRole = "viewer" | "editor" | "admin";
@@ -31,8 +31,9 @@ export interface AgentTeamGrant {
 
 // Keep the policy contract visible in every meaningful decision trail. A
 // version bump is required when the authorization semantics change.
-export const AGENTGATE_POLICY_VERSION = "bouncer-v4";
+export const AGENTGATE_POLICY_VERSION = "bouncer-v5";
 export const AGENTGATE_POLICY_REVISION = AGENTGATE_POLICY_VERSION;
+export const AGENTGATE_RISK_VERSION = "risk-v1";
 
 export interface HumanPrincipal {
   id: HumanId;
@@ -59,6 +60,78 @@ export type ContentAction =
   | "content.disclose"
   | "content.publish"
   | "content.export";
+
+export type RegisteredDestinationId =
+  | "tiktok-account:brand-sg"
+  | "tiktok-account:creator-demo"
+  | "analytics:approved-dashboard"
+  | "archive:compliance-store";
+
+export type DestinationStatus = "enabled" | "disabled" | "revoked";
+export type DestinationEnvironment = "local" | "staging" | "production";
+export type DestinationHttpMethod = "POST";
+export type DestinationAudience = "owner" | "team" | "external";
+export type DestinationReach = "narrow" | "broad";
+export type Region = "SG" | "GLOBAL";
+export type AssetType = "project_profile" | "deployment_target" | "team_file" | "short_video";
+
+export type RiskTier = "low" | "medium" | "high" | "critical";
+export type ApprovalAuthorityRole = "owner" | "independent_reviewer";
+export type ApprovalAuthorityStatus = "active" | "revoked";
+
+export interface ApprovalAuthority {
+  id: string;
+  humanId: HumanId;
+  organizationId: string;
+  accountId: string | null;
+  allowedActions: AgentGateAction[];
+  allowedRiskTiers: RiskTier[];
+  role: ApprovalAuthorityRole;
+  status: ApprovalAuthorityStatus;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  revokedAt: string | null;
+  revocationReason: string | null;
+}
+
+// Catalogue metadata is safe to persist. The corresponding credential value
+// is held only by the server-side broker and is never part of this record.
+export interface RegisteredDestination {
+  id: RegisteredDestinationId;
+  organizationId: string;
+  businessCenterId: string;
+  accountId: string;
+  allowedActions: ContentAction[];
+  httpMethod: DestinationHttpMethod;
+  httpsHost: string;
+  httpsPathPattern: string;
+  environment: DestinationEnvironment;
+  status: DestinationStatus;
+  revision: number;
+  credentialRef: string;
+  classification: ResourceClassification;
+  purposes: ContentPurpose[];
+  audience: DestinationAudience;
+  reach: DestinationReach;
+  region: Region;
+}
+
+export interface DestinationSideEffectReceipt {
+  id: string;
+  destinationId: RegisteredDestinationId;
+  action: ContentAction;
+  resourceId: string;
+  purpose: ContentPurpose;
+  httpMethod: DestinationHttpMethod;
+  httpsHost: string;
+  httpsPath: string;
+  environment: DestinationEnvironment;
+  destinationRevision: number;
+  resourceRevision: number;
+  credentialRef: string;
+  createdAt: string;
+}
 
 export interface ContentActionBinding {
   purpose: ContentPurpose;
@@ -119,6 +192,8 @@ export interface ContentAssetResource {
   accountId: string;
   assetId: string;
   contentVersion: string;
+  assetType?: "short_video";
+  sourceRegion?: Region;
 }
 
 export type ProtectedResource =
@@ -148,6 +223,7 @@ export interface PolicyActionAttributes {
   name: string;
   contentBinding?: ContentActionBinding;
   destination?: string | null;
+  registeredDestination?: RegisteredDestination | null;
 }
 
 export interface PolicyEnvironmentAttributes {
@@ -185,12 +261,20 @@ export type PolicyDenyReasonCode =
   | "content_version_mismatch"
   | "content_scope_missing"
   | "content_destination_unknown"
-  | "content_destination_mismatch";
+  | "content_destination_disabled"
+  | "content_destination_mismatch"
+  | "content_destination_revoked"
+  | "content_destination_action_mismatch"
+  | "content_destination_purpose_mismatch"
+  | "content_destination_classification_mismatch"
+  | "content_destination_environment_mismatch"
+  | "content_destination_tenant_mismatch"
+  | "destination_revision_changed";
 
 export type PolicyDecision =
   | {
       outcome: "allow";
-      risk: "low" | "medium";
+      risk: RiskTier;
       reasonCode:
         | "owned_resource_read"
         | "owned_staging_deploy"
@@ -200,12 +284,12 @@ export type PolicyDecision =
     }
   | {
       outcome: "deny";
-      risk: "low" | "medium" | "high";
+      risk: RiskTier;
       reasonCode: PolicyDenyReasonCode;
     }
   | {
       outcome: "require_approval";
-      risk: "high";
+      risk: RiskTier;
       reasonCode:
         | "production_deploy_requires_owner_approval"
         | "restricted_file_requires_temporary_elevation"
@@ -243,7 +327,10 @@ export type GatewayDenyReasonCode =
   | "approval_expired"
   | "capability_consumed"
   | "capability_revoked"
-  | "invalid_capability";
+  | "invalid_capability"
+  | "risk_facts_malformed"
+  | "risk_facts_changed"
+  | "approval_authority_revoked";
 
 export type GatewayResult =
   | {
@@ -266,12 +353,16 @@ export type GatewayResult =
       action: AgentGateAction;
       resourceId: string;
       approvalId: string;
-      risk: "high";
+      risk: RiskTier;
       reasonCode:
         | "production_deploy_requires_owner_approval"
         | "restricted_file_requires_temporary_elevation"
         | "content_publish_requires_owner_approval"
-        | "content_export_requires_owner_approval";
+        | "content_export_requires_owner_approval"
+        | "risk_requires_owner_approval"
+        | "risk_requires_dual_control";
+      requiredApprovalCount: number;
+      requiredApprovalRoles: ApprovalAuthorityRole[];
     }
   | {
       status: "failed";
@@ -304,7 +395,7 @@ export interface ApprovalRecord {
   requestId: string;
   action: AgentGateAction;
   resourceId: string;
-  risk: "high";
+  risk: RiskTier;
   reasonCode: string;
   status: "pending" | "approved" | "denied" | "expired" | "consumed" | "revoked";
   createdAt: string;
@@ -314,6 +405,7 @@ export interface ApprovalRecord {
   destination: string | null;
   policyRevision: string | null;
   resourceRevision: number | null;
+  destinationRevision: number | null;
   grantId?: string;
   teamId?: TeamId;
   bundleVersion?: number;
@@ -322,6 +414,23 @@ export interface ApprovalRecord {
   agentRole?: TeamRole;
   resourceClassification?: ResourceClassification;
   temporaryScope?: string[];
+  requesterHumanId: HumanId;
+  riskVersion: string;
+  riskFactsDigest: string;
+  requiredApprovalCount: number;
+  requiredApprovalRoles: ApprovalAuthorityRole[];
+  approvalDecisions: ApprovalDecision[];
+  organizationId: string;
+  accountId: string | null;
+}
+
+export interface ApprovalDecision {
+  humanId: HumanId;
+  authorityId: string;
+  authorityRevision: number;
+  role: ApprovalAuthorityRole;
+  decision: "approve" | "deny";
+  decidedAt: string;
 }
 
 export interface CapabilityLease {
@@ -340,6 +449,16 @@ export interface CapabilityLease {
   destination: string | null;
   policyRevision: string;
   resourceRevision: number;
+  destinationRevision: number | null;
+  risk: RiskTier;
+  riskVersion: string;
+  riskFactsDigest: string;
+  requiredApprovalCount: number;
+  requiredApprovalRoles: ApprovalAuthorityRole[];
+  approvalDecisions: ApprovalDecision[];
+  requesterHumanId: HumanId;
+  organizationId: string;
+  accountId: string | null;
   grantId?: string;
   teamId?: TeamId;
   bundleVersion?: number;
@@ -381,7 +500,7 @@ export type AuditEventType =
   | "agent_grant.revoked";
 
 export type AuditDecision = "allow" | "deny" | "require_approval";
-export type AuditRisk = "low" | "medium" | "high";
+export type AuditRisk = RiskTier;
 export type AuditStatus = "success" | "failure" | "pending";
 
 export interface AuditEvent {
@@ -414,6 +533,11 @@ export interface AuditEvent {
   resourceClassification: ResourceClassification | null;
   temporaryScope: string[] | null;
   rejectedFieldNames: string[] | null;
+  riskVersion: string | null;
+  riskFactsDigest: string | null;
+  requiredApprovalCount: number | null;
+  requiredApprovalRoles: ApprovalAuthorityRole[] | null;
+  approvalDecisions: ApprovalDecision[] | null;
 }
 
 export interface ActionExecutionRecord {
@@ -425,6 +549,17 @@ export interface ActionExecutionRecord {
   destination: string | null;
   policyRevision: string | null;
   resourceRevision: number | null;
+  destinationRevision: number | null;
+  requesterHumanId: HumanId | null;
+  organizationId: string | null;
+  accountId: string | null;
+  risk: RiskTier | null;
+  riskVersion: string | null;
+  riskFactsDigest: string | null;
+  requiredApprovalCount: number | null;
+  requiredApprovalRoles: ApprovalAuthorityRole[] | null;
+  approvalDecisions: ApprovalDecision[] | null;
+  destinationReceiptId?: string;
   status: "succeeded" | "failed";
   resultSummary?: unknown;
   completedAt: string;

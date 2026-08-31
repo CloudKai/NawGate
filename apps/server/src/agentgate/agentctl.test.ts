@@ -127,6 +127,17 @@ describe("agentctl", () => {
     expect(result.received[0].body).not.toHaveProperty("destination");
   });
 
+  it("uses only a registered destination ID for approved content publish", async () => {
+    const result = await runCli(["content", "publish", "asset-user-a-video-1"], "approval");
+    expect(result.code).toBe(0);
+    const firstAction = result.received[0].body as Record<string, unknown>;
+    expect(firstAction).toMatchObject({
+      action: "content.publish",
+      destination: "tiktok-account:brand-sg",
+    });
+    expect(result.stdout + result.stderr).not.toContain("SYNTHETIC_DESTINATION_SECRET_CANARY");
+  });
+
   it("does not expose a file write/delete/share command", async () => {
     const result = await runCli(["file", "write", "team-alpha-internal"], "success");
     expect(result.code).toBe(1);

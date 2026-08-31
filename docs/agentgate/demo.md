@@ -16,8 +16,8 @@ Open `http://localhost:3000` and use the side panel:
    `ALLOW` and `SUCCESS`.
 3. Run a protected read for `project-b`: it should show `DENY`, owner mismatch,
    and no protected execution.
-4. Run a production deploy: confirm the side-panel approval card appears and
-   no deployment occurs before approval.
+4. Run a production deploy: confirm the side-panel approval card appears with
+   `1 / 1` owner approval and no deployment occurs before approval.
 5. Switch to User B and confirm the Agent and approval are not visible.
 6. Switch back to User A, approve once, and confirm `CAPABILITY ISSUED`,
    `CAPABILITY CONSUMED`, and one successful protected action. The claim is
@@ -25,7 +25,7 @@ Open `http://localhost:3000` and use the side panel:
 7. Use **Revoke access** during an active Run when demonstrating the kill path;
    subsequent gateway requests receive an invalid runtime credential response.
 8. In the **Security Lab**, run **Own project**, **Cross-user deny**, and
-   **Forged admin**. Each result should show the real decision, `bouncer-v4`,
+   **Forged admin**. Each result should show the real decision, `bouncer-v5`,
    `RuntimeGateway`, and whether a protected side effect executed.
 9. For the complete JIT proof, select **Alpha restricted JIT**, approve the
    resulting card, then select **Complete approved JIT** in the Lab result.
@@ -36,6 +36,14 @@ Open `http://localhost:3000` and use the side panel:
     RuntimeGateway recheck deny with zero execution.
 
 The receipt is evidence only: it contains metadata and status, never secrets.
+
+For the Phase 5 critical path, use User A's `asset-user-a-video-2` publish
+request to `tiktok-account:brand-sg`. The approval card shows `critical` and
+`1 / 2` with owner plus independent reviewer roles. User A approves once;
+switch to the independent Org A reviewer, User C, and approve the second slot.
+Only then does the gateway issue and consume one exact capability. User B is
+not eligible for the Org A reviewer slot, and no runtime payload can change the
+risk tier or approver identity.
 
 ## Persistent Team Agent extension
 
@@ -87,8 +95,14 @@ Moderation returns only an aggregate result. Disclosure is limited to the
 backend-approved analytics scope for User A's exact asset. Publish and export
 show the normal owner approval card and consume one exact capability. The
 organisation, business centre, account, asset, purpose, content version, and
-registered synthetic destination are fixed by the server-side demo model; no
-external TikTok request or arbitrary URL is involved.
+registered synthetic destination are fixed by the server-side demo model. The
+destination IDs are `tiktok-account:brand-sg`,
+`tiktok-account:creator-demo`, `analytics:approved-dashboard`, and
+`archive:compliance-store`; the command accepts an ID reference, never a URL
+or credential. The local adapter records a safe receipt with route metadata
+and a credential reference, while keeping synthetic credentials and protected
+content server-side. No external TikTok request or network-isolation claim is
+involved.
 
 The **Replay capability** Security Lab scenario runs the first approved JIT
 read, then attempts a fresh-request replay with the consumed capability. It

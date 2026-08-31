@@ -1,10 +1,19 @@
 import type {
   AgentGateAction,
   ActionExecutionRecord,
+  ApprovalAuthorityRole,
+  ApprovalDecision,
+  ContentAction,
+  ContentPurpose,
   ProtectedActionResult,
   ProtectedResource,
+  HumanId,
+  RiskTier,
 } from "./types.js";
 import { JsonStore } from "../store.js";
+import type { Database } from "../types.js";
+import type { ContentDestinationExecutor } from "./local-destination-adapter.js";
+import type { RegisteredDestinationId } from "./types.js";
 
 const projectProfiles = new Map<string, string>([
   ["project-a", "Synthetic profile for project-a: owner User A."],
@@ -52,6 +61,18 @@ interface ExecutionContext {
   destination: string | null;
   policyRevision: string;
   resourceRevision: number;
+  destinationRevision: number | null;
+  contentPurpose: ContentPurpose | null;
+  finalRecheck?: (database: Database) => void | Promise<void>;
+  requesterHumanId?: HumanId;
+  organizationId?: string;
+  accountId?: string | null;
+  risk?: RiskTier;
+  riskVersion?: string;
+  riskFactsDigest?: string;
+  requiredApprovalCount?: number | null;
+  requiredApprovalRoles?: ApprovalAuthorityRole[] | null;
+  approvalDecisions?: ApprovalDecision[] | null;
 }
 
 export class ProtectedResourceService {
@@ -60,6 +81,7 @@ export class ProtectedResourceService {
   constructor(
     private readonly store: JsonStore,
     private readonly claims?: ResourceClaimInvalidator,
+    private readonly destinations?: ContentDestinationExecutor,
   ) {}
 
   getMetadata(resourceId: string): ProtectedResource | null {
@@ -98,22 +120,49 @@ export class ProtectedResourceService {
           summary: "Content moderation aggregate for " + resource.assetId + ": " + asset.moderationSummary,
         };
       }
-      if (action === "content.disclose") {
-        await this.persistExecution(execution, action, resourceId, expectedResourceRevision, {
-          summary: "Disclosed approved content for " + resource.assetId,
-        });
-        this.recordExecution(action, resourceId);
-        return {
-          summary: "Disclosed approved content for " + resource.assetId,
-          content: asset.content,
-        };
+      if (
+        !execution ||
+        !execution.destination ||
+        execution.destinationRevision === null ||
+        !execution.contentPurpose ||
+        !this.destinations
+      ) {
+        throw new ProtectedResourceError("Content destination execution context is incomplete");
       }
       const summary = action === "content.publish"
         ? "Published content for " + resource.assetId
-        : "Exported content for " + resource.assetId;
-      await this.persistExecution(execution, action, resourceId, expectedResourceRevision, { summary });
+        : action === "content.export"
+          ? "Exported content for " + resource.assetId
+          : "Disclosed approved content for " + resource.assetId;
+      await this.destinations.execute({
+        action: action as ContentAction,
+        resource,
+        purpose: execution.contentPurpose,
+        destinationId: execution.destination as RegisteredDestinationId,
+        destinationRevision: execution.destinationRevision,
+        resourceRevision: expectedResourceRevision,
+        execution: {
+          runId: execution.runId,
+          requestId: execution.requestId,
+          payloadDigest: execution.payloadDigest,
+          destination: execution.destination,
+          policyRevision: execution.policyRevision,
+          ...(execution.finalRecheck ? { finalRecheck: execution.finalRecheck } : {}),
+          ...(execution.requesterHumanId ? { requesterHumanId: execution.requesterHumanId } : {}),
+          ...(execution.organizationId ? { organizationId: execution.organizationId } : {}),
+          ...(execution.accountId !== undefined ? { accountId: execution.accountId } : {}),
+          ...(execution.risk ? { risk: execution.risk } : {}),
+          ...(execution.riskVersion ? { riskVersion: execution.riskVersion } : {}),
+          ...(execution.riskFactsDigest ? { riskFactsDigest: execution.riskFactsDigest } : {}),
+          ...(execution.requiredApprovalCount !== undefined ? { requiredApprovalCount: execution.requiredApprovalCount } : {}),
+          ...(execution.requiredApprovalRoles !== undefined ? { requiredApprovalRoles: execution.requiredApprovalRoles } : {}),
+          ...(execution.approvalDecisions !== undefined ? { approvalDecisions: execution.approvalDecisions } : {}),
+        },
+      });
       this.recordExecution(action, resourceId);
-      return { summary };
+      return action === "content.disclose"
+        ? { summary, content: asset.content }
+        : { summary };
     }
 
     if (action === "resource.read") {
@@ -152,7 +201,7 @@ export class ProtectedResourceService {
     const environment = action === "deploy.staging" ? "staging" : "production";
     const deployedVersion = "demo-" + Date.now();
     const expectedResourceRevision = execution?.resourceRevision ?? resource.revision;
-    await this.store.mutate((database) => {
+    await this.store.mutate(async (database) => {
       // The initial metadata check above is intentionally not sufficient:
       // another serialized mutation can bump the resource after that read
       // and before this callback runs. Verify the expected revision inside
@@ -163,6 +212,7 @@ export class ProtectedResourceService {
       if (!currentResource || currentResource.revision !== expectedResourceRevision) {
         throw new ProtectedResourceError("Protected resource revision changed");
       }
+      await execution?.finalRecheck?.(database);
       const state = database.deploymentStates.find(
         (candidate) =>
           candidate.resourceId === resourceId && candidate.environment === environment,
@@ -181,6 +231,16 @@ export class ProtectedResourceService {
           destination: execution.destination,
           policyRevision: execution.policyRevision,
           resourceRevision: execution.resourceRevision,
+          destinationRevision: execution.destinationRevision,
+          requesterHumanId: execution.requesterHumanId ?? null,
+          organizationId: execution.organizationId ?? null,
+          accountId: execution.accountId ?? null,
+          risk: execution.risk ?? null,
+          riskVersion: execution.riskVersion ?? null,
+          riskFactsDigest: execution.riskFactsDigest ?? null,
+          requiredApprovalCount: execution.requiredApprovalCount ?? null,
+          requiredApprovalRoles: execution.requiredApprovalRoles ?? null,
+          approvalDecisions: execution.approvalDecisions ?? null,
           action,
           resourceId,
           status: "succeeded",
@@ -246,7 +306,7 @@ export class ProtectedResourceService {
     resultSummary: ActionExecutionRecord["resultSummary"],
   ): Promise<void> {
     if (!execution && expectedResourceRevision === undefined) return;
-    await this.store.mutate((database) => {
+    await this.store.mutate(async (database) => {
       if (expectedResourceRevision !== undefined) {
         const currentResource = database.protectedResources.find(
           (candidate) => candidate.id === resourceId,
@@ -255,6 +315,7 @@ export class ProtectedResourceService {
           throw new ProtectedResourceError("Protected resource revision changed");
         }
       }
+      await execution?.finalRecheck?.(database);
       if (!execution) return;
       database.actionExecutions.push({
           runId: execution.runId,
@@ -263,6 +324,16 @@ export class ProtectedResourceService {
           destination: execution.destination,
           policyRevision: execution.policyRevision,
           resourceRevision: execution.resourceRevision,
+          destinationRevision: execution.destinationRevision,
+          requesterHumanId: execution.requesterHumanId ?? null,
+          organizationId: execution.organizationId ?? null,
+          accountId: execution.accountId ?? null,
+          risk: execution.risk ?? null,
+          riskVersion: execution.riskVersion ?? null,
+          riskFactsDigest: execution.riskFactsDigest ?? null,
+          requiredApprovalCount: execution.requiredApprovalCount ?? null,
+          requiredApprovalRoles: execution.requiredApprovalRoles ?? null,
+          approvalDecisions: execution.approvalDecisions ?? null,
           action,
         resourceId,
         status: "succeeded",
