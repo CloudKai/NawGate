@@ -96,7 +96,10 @@ or read the [GitHub-friendly architecture overview](docs/nawgate/architecture.md
 - Either a Volcengine Ark credential or an OpenAI-compatible Responses API
   credential and model
 
-Codex CLI is included in the Runtime image and is not required on the host.
+Codex CLI is included in the Runtime image and is not required on the host when
+using `npm run poc` with the container Runtime. The default `npm run dev`
+configuration uses the local-process Runtime and therefore requires a host
+Codex executable configured through `CODEX_BIN`.
 
 ## Local browser SOP
 
@@ -257,8 +260,6 @@ docker compose down
 ```bash
 npm install
 cp .env.example .env
-npm install --global @openai/codex@0.111.0
-npm run dev
 ```
 
 - Web UI: [http://localhost:5173](http://localhost:5173)
@@ -267,10 +268,62 @@ npm run dev
 Use local paths in `.env` when running outside Docker:
 
 ```dotenv
-APP_DATA_DIR=.data
-AGENT_WORKSPACE_ROOT=workspaces
-CODEX_HOME=codex-home
+APP_DATA_DIR=.local/data
+AGENT_WORKSPACE_ROOT=.local/workspaces
+CODEX_HOME=.local/codex-home
+NAWGATE_GATEWAY_URL=http://127.0.0.1:3000
 ```
+
+### Local-process setup on macOS and Linux
+
+Local development requires Node.js 22+ and a host Codex executable. Confirm the
+Node version in the same terminal that will run the server:
+
+```bash
+node --version
+```
+
+If Homebrew installed Node.js 22 on macOS, select it with:
+
+```bash
+export PATH="$(brew --prefix node@22)/bin:$PATH"
+hash -r
+node --version
+```
+
+The ChatGPT macOS application includes a Codex executable. Configure its
+absolute path before starting local development:
+
+```bash
+export CODEX_BIN="/Applications/ChatGPT.app/Contents/Resources/codex"
+"$CODEX_BIN" --version
+npm run dev
+```
+
+On Linux, install Codex CLI if it is not already available, then resolve its
+absolute path:
+
+```bash
+npm install --global @openai/codex@0.111.0
+export CODEX_BIN="$(command -v codex)"
+"$CODEX_BIN" --version
+npm run dev
+```
+
+To persist the executable selection, put the resolved absolute path in `.env`:
+
+```dotenv
+# macOS with the ChatGPT application
+CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
+
+# Linux example; replace this with the output of `command -v codex`
+# CODEX_BIN=/usr/local/bin/codex
+```
+
+If a Run fails with `spawn codex ENOENT`, the server cannot locate the Codex
+executable. Set `CODEX_BIN` to an existing absolute path, restart `npm run dev`,
+and verify that `"$CODEX_BIN" --version` succeeds in that terminal. This error
+is unrelated to the selected model provider or API key.
 
 ## Deployment
 
@@ -306,6 +359,7 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `OPENAI_BASE_URL`              | `https://api.openai.com/v1`  | OpenAI-compatible Responses API URL.                   |
 | `APP_AUTH_TOKEN`               | Empty on loopback              | Shared demo token; use 24+ random characters remotely. |
 | `RUNTIME_PROVIDER`             | `local-process`              | `container` for disposable local Runtime containers. |
+| `CODEX_BIN`                    | `codex`                      | Host Codex executable name or absolute path.           |
 | `CODEX_SANDBOX_MODE`           | `workspace-write`            | Codex inner sandbox mode.                              |
 | `CODEX_TIMEOUT_MS`             | `600000`                     | Maximum duration of one turn.                          |
 | `NAWGATE_GATEWAY_URL`          | `http://127.0.0.1:<PORT>`    | Runtime gateway URL injected into each Run.            |

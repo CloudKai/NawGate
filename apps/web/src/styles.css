@@ -1288,10 +1288,41 @@ textarea:focus {
 
 .security-lab-result-heading {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   color: #4b4c46;
   font-size: 10px;
+}
+
+.security-lab-result-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.security-lab-result-status button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #77766f;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.security-lab-result-status button:hover {
+  color: #393a35;
+  background: rgba(57, 58, 53, 0.08);
+}
+
+.security-lab-result-status button:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 1px;
 }
 
 .security-lab-result > span,
@@ -1913,4 +1944,3 @@ textarea:focus {
   font-size: 10px;
   color: #92938a;
 }
-

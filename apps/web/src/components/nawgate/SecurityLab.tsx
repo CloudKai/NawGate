@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import type { SecurityLabResult, SecurityLabScenario } from "../../types";
 
@@ -20,6 +20,23 @@ const scenarios: { id: SecurityLabScenario; label: string; description: string }
   { id: "queued-after-revoke", label: "Queued after revoke", description: "Initial allow → queued → revoke → final recheck deny" },
 ];
 
+const RESULT_LIMIT = 4;
+const RESULT_AUTO_DISMISS_MS = 12_000;
+
+export function mergeSecurityLabResult(
+  current: SecurityLabResult[],
+  next: SecurityLabResult,
+): SecurityLabResult[] {
+  return [next, ...current.filter((result) => result.scenario !== next.scenario)].slice(
+    0,
+    RESULT_LIMIT,
+  );
+}
+
+export function shouldAutoDismissSecurityLabResult(result: SecurityLabResult): boolean {
+  return result.operationState !== "pending_approval";
+}
+
 function statusClass(result: SecurityLabResult): string {
   return result.status === "success"
     ? "security-lab-result security-lab-allow"
@@ -32,13 +49,66 @@ export function SecurityLab({ agentId, onStateChanged }: SecurityLabProps) {
   const [running, setRunning] = useState<SecurityLabScenario | null>(null);
   const [results, setResults] = useState<SecurityLabResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const dismissTimers = useRef(new Map<SecurityLabScenario, number>());
+
+  const clearDismissTimer = useCallback((scenario: SecurityLabScenario) => {
+    const timer = dismissTimers.current.get(scenario);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      dismissTimers.current.delete(scenario);
+    }
+  }, []);
+
+  const dismissResult = useCallback(
+    (result: SecurityLabResult) => {
+      clearDismissTimer(result.scenario);
+      setResults((current) =>
+        current.filter((candidate) => candidate.requestId !== result.requestId),
+      );
+    },
+    [clearDismissTimer],
+  );
+
+  const showResult = useCallback(
+    (result: SecurityLabResult) => {
+      clearDismissTimer(result.scenario);
+      setResults((current) => mergeSecurityLabResult(current, result));
+      if (!shouldAutoDismissSecurityLabResult(result)) return;
+
+      const timer = window.setTimeout(() => {
+        setResults((current) =>
+          current.filter((candidate) => candidate.requestId !== result.requestId),
+        );
+        if (dismissTimers.current.get(result.scenario) === timer) {
+          dismissTimers.current.delete(result.scenario);
+        }
+      }, RESULT_AUTO_DISMISS_MS);
+      dismissTimers.current.set(result.scenario, timer);
+    },
+    [clearDismissTimer],
+  );
+
+  useEffect(() => {
+    setResults([]);
+    setError(null);
+    return () => {
+      for (const timer of dismissTimers.current.values()) window.clearTimeout(timer);
+      dismissTimers.current.clear();
+    };
+  }, [agentId]);
+
+  const hasPendingJit = results.some(
+    (result) =>
+      result.scenario === "alpha-restricted-jit" &&
+      result.operationState === "pending_approval",
+  );
 
   const runScenario = async (scenario: SecurityLabScenario) => {
     setRunning(scenario);
     setError(null);
     try {
       const result = await api.securityLab(agentId, scenario);
-      setResults((current) => [result, ...current].slice(0, 6));
+      showResult(result);
       onStateChanged();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -54,7 +124,7 @@ export function SecurityLab({ agentId, onStateChanged }: SecurityLabProps) {
       const result = cancel
         ? await api.cancelSecurityLabJit(agentId, scenarioId)
         : await api.continueSecurityLabJit(agentId, scenarioId);
-      setResults((current) => [result, ...current].slice(0, 6));
+      showResult(result);
       onStateChanged();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -81,9 +151,13 @@ export function SecurityLab({ agentId, onStateChanged }: SecurityLabProps) {
             className="security-lab-button"
             key={scenario.id}
             type="button"
-            disabled={running !== null}
+            disabled={running !== null || hasPendingJit}
             onClick={() => void runScenario(scenario.id)}
-            title={scenario.description}
+            title={
+              hasPendingJit
+                ? "Complete or cancel the pending JIT request first"
+                : scenario.description
+            }
           >
             {running === scenario.id ? "Testing…" : scenario.label}
           </button>
@@ -95,7 +169,19 @@ export function SecurityLab({ agentId, onStateChanged }: SecurityLabProps) {
           <div className={statusClass(result)} key={result.runId + result.requestId}>
             <div className="security-lab-result-heading">
               <strong>{scenarios.find((scenario) => scenario.id === result.scenario)?.label}</strong>
-              <span>{result.decision.toUpperCase()}</span>
+              <div className="security-lab-result-status">
+                <span>{result.decision.toUpperCase()}</span>
+                {shouldAutoDismissSecurityLabResult(result) && (
+                  <button
+                    type="button"
+                    onClick={() => dismissResult(result)}
+                    aria-label={`Dismiss ${result.scenario} result`}
+                    title="Dismiss result"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
             <span>{result.action} · {result.resourceId} · {result.reasonCode}</span>
             <small>
