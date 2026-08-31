@@ -11,6 +11,7 @@ import { ProtectedResourceService } from "./nawgate/protected-resource-service.j
 import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
 import { SecurityLabService } from "./nawgate/security-lab-service.js";
+import { TeamMembershipService } from "./nawgate/team-membership-service.js";
 import { DestinationCatalogueService } from "./nawgate/destination-catalogue.js";
 import { LocalDestinationAdapter } from "./nawgate/local-destination-adapter.js";
 import { ServerSideCredentialBroker } from "./nawgate/destination-broker.js";
@@ -109,6 +110,7 @@ async function makeRuntimeApp(
   const resources = new ProtectedResourceService(store, approvals, destinationAdapter);
   const credentials = new RuntimeCredentialService();
   const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
+  const memberships = new TeamMembershipService(store);
   const gateway = new RuntimeGateway(
     new DeterministicPolicyEngine(),
     resources,
@@ -125,6 +127,7 @@ async function makeRuntimeApp(
     approvals,
     audit,
     grants,
+    memberships,
     gateway,
     securityLab: new SecurityLabService(gateway, approvals, audit, credentials, grants),
   };
@@ -148,6 +151,111 @@ function runtimeHeaders(token: string) {
 }
 
 describe("Runtime API boundary", () => {
+  it("lists memberships and lets only a team admin add a demo user", async () => {
+    const { app } = await makeRuntimeApp();
+    const auth = { authorization: "Bearer outer-token-for-tests" };
+    const userASession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: auth,
+      payload: { userId: "user-a" },
+    });
+    const userAHeaders = {
+      ...auth,
+      "x-nawgate-session": (userASession.json() as { sessionToken: string }).sessionToken,
+    };
+
+    const initial = await app.inject({
+      method: "GET",
+      url: "/api/demo/me/team-memberships",
+      headers: userAHeaders,
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      memberships: [{ teamId: "team-alpha", humanId: "user-a", role: "admin" }],
+    });
+
+    const added = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships",
+      headers: userAHeaders,
+      payload: { memberId: "user-c", teamId: "team-alpha", role: "viewer" },
+    });
+    expect(added.statusCode).toBe(201);
+    expect(added.json()).toMatchObject({
+      membership: { teamId: "team-alpha", humanId: "user-c", role: "viewer" },
+    });
+
+    const userCSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: auth,
+      payload: { userId: "user-c" },
+    });
+    const userC = await app.inject({
+      method: "GET",
+      url: "/api/demo/me/team-memberships",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userCSession.json() as { sessionToken: string }).sessionToken,
+      },
+    });
+    expect(userC.json()).toMatchObject({
+      memberships: [{ teamId: "team-alpha", humanId: "user-c", role: "viewer" }],
+    });
+
+    const removed = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships/remove",
+      headers: userAHeaders,
+      payload: { memberId: "user-c", teamId: "team-alpha" },
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json()).toMatchObject({
+      membership: { teamId: "team-alpha", humanId: "user-c", role: "viewer" },
+    });
+
+    const userCAfterRemoval = await app.inject({
+      method: "GET",
+      url: "/api/demo/me/team-memberships",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userCSession.json() as { sessionToken: string }).sessionToken,
+      },
+    });
+    expect(userCAfterRemoval.json()).toEqual({ memberships: [] });
+
+    const userBSession = await app.inject({
+      method: "POST",
+      url: "/api/demo/session",
+      headers: auth,
+      payload: { userId: "user-b" },
+    });
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userBSession.json() as { sessionToken: string }).sessionToken,
+      },
+      payload: { memberId: "user-c", teamId: "team-alpha", role: "admin" },
+    });
+    expect(rejected.statusCode).toBe(403);
+    expect(rejected.json()).toMatchObject({ code: "TEAM_ADMIN_REQUIRED" });
+
+    const cannotRemoveLastBetaAdmin = await app.inject({
+      method: "POST",
+      url: "/api/demo/team-memberships/remove",
+      headers: {
+        ...auth,
+        "x-nawgate-session": (userBSession.json() as { sessionToken: string }).sessionToken,
+      },
+      payload: { memberId: "user-b", teamId: "team-beta" },
+    });
+    expect(cannotRemoveLastBetaAdmin.statusCode).toBe(409);
+    expect(cannotRemoveLastBetaAdmin.json()).toMatchObject({ code: "LAST_TEAM_ADMIN" });
+  });
+
   it("keeps destination secret canaries out of application logs, HTTP, workspace, and receipts", async () => {
     const canary = "DESTINATION_SECRET_CANARY_HTTP_LOG_WORKSPACE_RECEIPT";
     const successLog = new PassThrough();

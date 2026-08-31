@@ -37,6 +37,17 @@ Open `http://localhost:3000` and use the side panel:
 
 The receipt is evidence only: it contains metadata and status, never secrets.
 
+## Managing demo team membership
+
+The actor card in the left sidebar shows the selected human's current teams.
+When acting as a team administrator, use **Add a user** to choose a demo user,
+team, and role. For example, User A can add User C to Team Alpha. Switch to
+User C afterward to verify that Team Alpha appears in that user's membership
+list. User B is the Team Beta administrator and can manage Beta memberships in
+the same way. Each managed member also has a **Remove** action; the final team
+administrator cannot be removed. Non-admin actors can view their memberships
+but cannot add or remove members.
+
 For the Phase 5 critical path, use User A's `asset-user-a-video-2` publish
 request to `tiktok-account:brand-sg`. The approval card shows `critical` and
 `1 / 2` with owner plus independent reviewer roles. User A approves once;

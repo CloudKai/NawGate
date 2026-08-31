@@ -15,7 +15,7 @@ export const DEMO_USERS: readonly HumanPrincipal[] = [
 export const DEMO_TEAM_MEMBERSHIPS: readonly TeamMembership[] = [
   { teamId: "team-alpha", humanId: "user-a", role: "admin" },
   { teamId: "team-alpha", humanId: "user-b", role: "viewer" },
-  { teamId: "team-beta", humanId: "user-b", role: "editor" },
+  { teamId: "team-beta", humanId: "user-b", role: "admin" },
 ];
 
 export const DEMO_APPROVAL_AUTHORITIES: readonly ApprovalAuthority[] = [
