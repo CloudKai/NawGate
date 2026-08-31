@@ -6,6 +6,7 @@ import type {
   AuditEvent,
   HumanId,
   Message,
+  ReplayPayload,
   SystemInfo,
   SecurityLabResult,
   SecurityLabScenario,
@@ -169,4 +170,6 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  getReplay: (agentId: string, runId: string) =>
+    request<{ replay: ReplayPayload }>("/api/agents/" + agentId + "/replays/" + runId),
 };

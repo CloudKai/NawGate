@@ -11,6 +11,7 @@ import { ApprovalError, ApprovalService } from "./nawgate/approval-service.js";
 import { ApprovalAuthorityService } from "./nawgate/approval-authority-service.js";
 import { AgentTeamGrantService } from "./nawgate/agent-team-grant-service.js";
 import { AuditService } from "./nawgate/audit-service.js";
+import { getReplay } from "./nawgate/flight-recorder.js";
 import { IdentityService } from "./nawgate/identity-service.js";
 import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
@@ -23,6 +24,10 @@ import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
+const agentReplayParams = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+});
 const createAgentBody = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().max(500).optional(),
@@ -339,6 +344,17 @@ export async function createApp(
       service.getAgent(id, actor);
       const events = runtime.audit.list(id, query.runId);
       return { audit: events.slice(Math.max(0, events.length - query.limit)) };
+    });
+
+    app.get("/api/agents/:id/replays/:runId", async (request) => {
+      const { id, runId } = agentReplayParams.parse(request.params);
+      const actor = humanActor(request);
+      service.getAgent(id, actor);
+      const replay = await getReplay(id, runId, config.dataDirectory);
+      if (!replay) {
+        throw new HttpError(404, "Flight replay not found");
+      }
+      return { replay };
     });
 
     app.post("/api/agents/:id/revoke-access", async (request) => {

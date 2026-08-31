@@ -204,3 +204,23 @@ export interface SecurityLabResult {
   protectedActionExecuted: boolean;
   summary: string;
 }
+
+export interface ReplayPayload {
+  runId: string;
+  agentId: string;
+  ownerUserId: HumanId;
+  prompt: string;
+  output: string | null;
+  error: string | null;
+  status: RunStatus;
+  usage: {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+  } | null;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  auditEvents: AuditEvent[];
+}
+

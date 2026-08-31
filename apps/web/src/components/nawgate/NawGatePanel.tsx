@@ -1,8 +1,10 @@
 import { useState } from "react";
-import type { Agent, AgentTeamGrant, ApprovalRecord, AuditEvent } from "../../types";
+import { api } from "../../api";
+import type { Agent, AgentTeamGrant, ApprovalRecord, AuditEvent, ReplayPayload } from "../../types";
 import { ApprovalCard } from "./ApprovalCard";
 import { AuditTimeline } from "./AuditTimeline";
 import { DelegationReceipt } from "./DelegationReceipt";
+import { FlightReplayModal } from "./FlightReplayModal";
 import { SecurityLab } from "./SecurityLab";
 
 interface NawGatePanelProps {
@@ -39,6 +41,28 @@ export function NawGatePanel({
   onLabStateChanged,
 }: NawGatePanelProps) {
   const [grantRole, setGrantRole] = useState<"viewer" | "editor" | "admin">("viewer");
+  const [activeReplay, setActiveReplay] = useState<ReplayPayload | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [showReplayModal, setShowReplayModal] = useState(false);
+
+  const handleViewReplay = async (runId: string) => {
+    setShowReplayModal(true);
+    setReplayLoading(true);
+    try {
+      const { replay } = await api.getReplay(agent.id, runId);
+      setActiveReplay(replay);
+    } catch {
+      setActiveReplay(null);
+    } finally {
+      setReplayLoading(false);
+    }
+  };
+
+  const handleCloseReplay = () => {
+    setShowReplayModal(false);
+    setActiveReplay(null);
+  };
+
   const alphaGrant = grants.find(
     (grant) => grant.teamId === "team-alpha" && grant.status === "active",
   );
@@ -50,7 +74,13 @@ export function NawGatePanel({
           <span className="eyebrow">Bouncer / NawGate</span>
           <h2 id="nawgate-title">Delegated access evidence</h2>
         </div>
-        <span className="owner-chip">Owner · {agent.ownerUserId === "user-a" ? "User A" : "User B"}</span>
+        <div className="header-chips">
+          <span className="dlp-status-chip" title="Real-time regex data loss prevention active">
+            <span className="dlp-dot" />
+            DLP Active
+          </span>
+          <span className="owner-chip">Owner · {agent.ownerUserId === "user-a" ? "User A" : "User B"}</span>
+        </div>
       </div>
       {agent.status === "busy" && (
         <div className="revocation-bar">
@@ -145,11 +175,18 @@ export function NawGatePanel({
             <strong>Audit timeline</strong>
             <span>latest</span>
           </div>
-          <AuditTimeline events={audit} />
+          <AuditTimeline events={audit} onViewReplay={handleViewReplay} />
         </div>
       </div>
       <SecurityLab agentId={agent.id} onStateChanged={onLabStateChanged} />
       <DelegationReceipt agent={agent} approvals={approvalHistory} audit={audit} />
+      {showReplayModal && (
+        <FlightReplayModal
+          replay={activeReplay}
+          loading={replayLoading}
+          onClose={handleCloseReplay}
+        />
+      )}
     </section>
   );
 }

@@ -2,9 +2,12 @@ import type { AppConfig } from "../config.js";
 import { RunCancelledError } from "../errors.js";
 import { AuditService } from "./audit-service.js";
 import { ApprovalService } from "./approval-service.js";
+import { recordFlightData } from "./flight-recorder.js";
 import { RuntimeCredentialService } from "./runtime-credential-service.js";
 import type {
   AgentRunner,
+  RunStatus,
+  RunUsage,
   RunnerRequest,
   RunnerResult,
 } from "../types.js";
@@ -26,6 +29,10 @@ export class MiddlewareRunner implements AgentRunner {
 
   async run(request: RunnerRequest): Promise<RunnerResult> {
     const startedAt = Date.now();
+    let finalStatus: RunStatus = "completed";
+    let finalOutput: string | null = null;
+    let finalError: string | null = null;
+    let finalUsage: RunUsage | null = null;
     const credential = this.credentials.issue(
       request.agentId,
       request.runId,
@@ -82,6 +89,8 @@ export class MiddlewareRunner implements AgentRunner {
             }
           : {}),
       });
+      finalOutput = redactRuntimeCredential(result.output, credential.token);
+      finalUsage = result.usage;
       await this.audit.record({
         eventType: "run.completed",
         humanId: request.ownerUserId,
@@ -100,12 +109,15 @@ export class MiddlewareRunner implements AgentRunner {
       });
       return {
         ...result,
-        output: redactRuntimeCredential(result.output, credential.token),
+        output: finalOutput,
         threadId: result.threadId
           ? redactRuntimeCredential(result.threadId, credential.token)
           : null,
       };
     } catch (error) {
+      finalStatus = error instanceof RunCancelledError ? "cancelled" : "failed";
+      finalError = error instanceof Error ? error.message : String(error);
+      finalError = redactRuntimeCredential(finalError, credential.token);
       await this.audit.record({
         eventType: error instanceof RunCancelledError ? "run.cancelled" : "run.failed",
         humanId: request.ownerUserId,
@@ -150,6 +162,28 @@ export class MiddlewareRunner implements AgentRunner {
         enforcementPoint: "MiddlewareRunner",
         protectedActionExecuted: false,
       });
+      try {
+        const auditEvents = this.audit.list(request.agentId, request.runId);
+        await recordFlightData(
+          {
+            runId: request.runId,
+            agentId: request.agentId,
+            ownerUserId: request.ownerUserId,
+            prompt: request.prompt,
+            output: finalOutput,
+            error: finalError,
+            status: finalStatus,
+            usage: finalUsage,
+            startedAt: new Date(startedAt).toISOString(),
+            completedAt: new Date().toISOString(),
+            durationMs: Date.now() - startedAt,
+            auditEvents,
+          },
+          this.config.dataDirectory,
+        );
+      } catch {
+        // Flight data recording is non-blocking to never mask primary execution errors
+      }
     }
   }
 

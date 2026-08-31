@@ -2,6 +2,7 @@ import type { AuditEvent } from "../../types";
 
 interface AuditTimelineProps {
   events: AuditEvent[];
+  onViewReplay?: (runId: string) => void;
 }
 
 function label(value: string | null): string {
@@ -27,7 +28,7 @@ function decisionLabel(event: AuditEvent): string {
   return labels[event.eventType] ?? (event.status === "failure" ? "FAILURE" : label(event.eventType));
 }
 
-export function AuditTimeline({ events }: AuditTimelineProps) {
+export function AuditTimeline({ events, onViewReplay }: AuditTimelineProps) {
   const latest = [...events].reverse().slice(0, 8);
   if (latest.length === 0) {
     return (
@@ -42,7 +43,19 @@ export function AuditTimeline({ events }: AuditTimelineProps) {
           <div className="audit-event-copy">
             <div className="audit-event-heading">
               <strong>{decisionLabel(event)}</strong>
-              <time>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+              <div className="audit-event-actions">
+                {event.runId && onViewReplay && (
+                  <button
+                    type="button"
+                    className="replay-link-btn"
+                    onClick={() => onViewReplay(event.runId!)}
+                    title="View Flight Recording & Replay"
+                  >
+                    <span>▶</span> Replay
+                  </button>
+                )}
+                <time>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+              </div>
             </div>
             <span>{label(event.action)} · {label(event.resourceId)} · {label(event.reasonCode)}</span>
             {event.explanation && <p className="audit-explanation">{event.explanation}</p>}

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { maskSensitiveData } from "./dlp-service.js";
 import type {
   NawGateAction,
   AuditDecision,
@@ -80,7 +81,7 @@ export class AuditService {
       resourceId: safeResourceId,
       decision: input.decision,
       risk: input.risk,
-      reasonCode: input.reasonCode,
+      reasonCode: input.reasonCode ? maskSensitiveData(input.reasonCode) : null,
       approvalId: input.approvalId,
       capabilityId: input.capabilityId,
       status: input.status,
@@ -88,7 +89,7 @@ export class AuditService {
       policyVersion:
         input.policyVersion ??
         (input.eventType.startsWith("policy.") ? NAWGATE_POLICY_VERSION : null),
-      explanation: input.explanation ?? null,
+      explanation: input.explanation ? maskSensitiveData(input.explanation) : null,
       enforcementPoint: input.enforcementPoint ?? null,
       protectedActionExecuted: input.protectedActionExecuted ?? null,
       grantId: input.grantId ?? null,
