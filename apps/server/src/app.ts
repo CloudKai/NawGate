@@ -15,6 +15,7 @@ import { getReplay } from "./nawgate/flight-recorder.js";
 import { IdentityService } from "./nawgate/identity-service.js";
 import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
 import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
+import { TeamMembershipService } from "./nawgate/team-membership-service.js";
 import {
   SECURITY_LAB_SCENARIOS,
   SecurityLabService,
@@ -42,6 +43,15 @@ const messageBody = z.object({
 });
 const demoSessionBody = z.object({
   userId: z.enum(["user-a", "user-b", "user-c"]),
+}).strict();
+const teamMembershipBody = z.object({
+  memberId: z.enum(["user-a", "user-b", "user-c"]),
+  teamId: z.enum(["team-alpha", "team-beta"]),
+  role: z.enum(["viewer", "editor", "admin"]),
+}).strict();
+const removeTeamMembershipBody = z.object({
+  memberId: z.enum(["user-a", "user-b", "user-c"]),
+  teamId: z.enum(["team-alpha", "team-beta"]),
 }).strict();
 const emptyBody = z.object({}).strict();
 const runtimeActionBody = z.object({
@@ -88,6 +98,7 @@ export interface RuntimeApiDependencies {
   approvals: ApprovalService;
   audit: AuditService;
   grants?: AgentTeamGrantService;
+  memberships?: TeamMembershipService;
   securityLab?: SecurityLabService;
   authorities?: ApprovalAuthorityService;
 }
@@ -285,6 +296,28 @@ export async function createApp(
     const body = demoSessionBody.parse(request.body);
     return identity.createSession(body.userId);
   });
+
+  if (runtime?.memberships) {
+    app.get("/api/demo/me/team-memberships", async (request) => ({
+      memberships: runtime.memberships!.resolveMemberships(humanActor(request).id),
+    }));
+
+    app.get("/api/demo/team-memberships", async (request) => ({
+      memberships: runtime.memberships!.resolveManageableMemberships(humanActor(request).id),
+    }));
+
+    app.post("/api/demo/team-memberships", async (request, reply) => {
+      const body = teamMembershipBody.parse(request.body);
+      const membership = await runtime.memberships!.addMembership(body, humanActor(request));
+      return reply.code(201).send({ membership });
+    });
+
+    app.post("/api/demo/team-memberships/remove", async (request) => {
+      const body = removeTeamMembershipBody.parse(request.body);
+      const membership = await runtime.memberships!.removeMembership(body, humanActor(request));
+      return { membership };
+    });
+  }
 
   app.get("/api/demo/me", async (request) => ({ user: humanActor(request) }));
 

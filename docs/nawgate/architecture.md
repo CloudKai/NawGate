@@ -233,6 +233,16 @@ Persistent enrollment uses `GET/POST /api/agents/:id/team-grants` and
 `POST /api/agents/:id/team-grants/:grantId/revoke`. The current POC requires
 the same human to own the Agent and hold the team-admin relationship.
 
+Human team memberships are resolved from the server-side `JsonStore`. The Web
+UI displays the current actor's memberships through
+`GET /api/demo/me/team-memberships`; adding a membership uses
+`POST /api/demo/team-memberships` and requires the acting session principal to
+be an administrator of the selected team. The request's member identifier is
+only the target user; it never replaces the authenticated actor. Admins can
+remove members through `POST /api/demo/team-memberships/remove`; the
+membership service keeps the last administrator in each team from being
+removed.
+
 ## Scope limits
 
 NawGate protects registered actions routed through `agentctl` and

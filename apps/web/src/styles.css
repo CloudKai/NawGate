@@ -363,6 +363,161 @@ button {
   font-size: 11px;
 }
 
+.team-membership-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid #3d3d38;
+  border-radius: 12px;
+  background: #292925;
+  color: #a7a69e;
+  font-size: 10px;
+}
+
+.team-membership-heading,
+.team-membership-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.team-membership-heading {
+  color: #f5f3ed;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.team-membership-heading::-webkit-details-marker {
+  display: none;
+}
+
+.team-membership-heading::before {
+  content: "＋";
+  width: 14px;
+  color: #9d91ed;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.team-membership-panel[open] .team-membership-heading::before {
+  content: "−";
+}
+
+.team-membership-heading > span:last-child {
+  color: #918bba;
+}
+
+.team-membership-list {
+  display: grid;
+  gap: 6px;
+}
+
+.team-membership-row {
+  padding: 7px 8px;
+  border: 1px solid #41413c;
+  border-radius: 7px;
+  background: #242421;
+  color: #c6c4bc;
+}
+
+.team-membership-row strong {
+  color: #9d91ed;
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.team-membership-empty,
+.team-membership-help {
+  margin: 0;
+  color: #85857e;
+  line-height: 1.45;
+}
+
+.team-membership-form {
+  display: grid;
+  gap: 7px;
+  padding-top: 4px;
+  border-top: 1px solid #41413c;
+}
+
+.team-membership-management {
+  display: grid;
+  gap: 7px;
+  margin-top: 6px;
+  padding-bottom: 3px;
+}
+
+.team-membership-managed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  padding: 7px 0;
+  border-top: 1px solid #41413c;
+}
+
+.team-membership-managed-row > div {
+  min-width: 0;
+}
+
+.team-membership-managed-row strong,
+.team-membership-managed-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-membership-managed-row strong {
+  color: #c6c4bc;
+  font-size: 10px;
+}
+
+.team-membership-managed-row span {
+  margin-top: 3px;
+  color: #85857e;
+  font-size: 9px;
+}
+
+.team-membership-managed-row .button {
+  flex: 0 0 auto;
+  min-height: 27px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.team-membership-form-title {
+  color: #c6c4bc;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.team-membership-form label {
+  display: grid;
+  gap: 4px;
+  color: #85857e;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.team-membership-form select {
+  min-height: 30px;
+  border: 1px solid #4a4943;
+  border-radius: 7px;
+  padding: 0 7px;
+  color: #f5f3ed;
+  background: #242421;
+  font-size: 10px;
+}
+
+.team-membership-form .button {
+  min-height: 32px;
+  font-size: 10px;
+}
+
 .eyebrow {
   color: #898982;
   font-size: 9px;

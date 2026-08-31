@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
 import { NawGatePanel } from "./components/nawgate/NawGatePanel";
 import { DemoActorSwitch } from "./components/nawgate/DemoActorSwitch";
+import { TeamMembershipPanel } from "./components/nawgate/TeamMembershipPanel";
 import type {
   Agent,
   AgentTeamGrant,
@@ -12,6 +13,9 @@ import type {
   HumanPrincipal,
   Message,
   SystemInfo,
+  TeamId,
+  TeamMembership,
+  TeamRole,
 } from "./types";
 
 const starterPrompts = [
@@ -58,6 +62,9 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [actor, setActor] = useState<HumanPrincipal | null>(null);
+  const [users, setUsers] = useState<HumanPrincipal[]>([]);
+  const [memberships, setMemberships] = useState<TeamMembership[]>([]);
+  const [manageableMemberships, setManageableMemberships] = useState<TeamMembership[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalRecord[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
@@ -116,6 +123,14 @@ export default function App() {
   const bootstrap = useCallback(async () => {
     const session = await api.demoSession("user-a");
     setActor(session.user);
+    const [userResult, membershipResult, manageableResult] = await Promise.all([
+      api.demoUsers(),
+      api.teamMemberships(),
+      api.manageableTeamMemberships(),
+    ]);
+    setUsers(userResult.users);
+    setMemberships(membershipResult.memberships);
+    setManageableMemberships(manageableResult.memberships);
     await Promise.all([refreshAgents(), api.system().then(setSystem)]);
   }, [refreshAgents]);
 
@@ -276,7 +291,13 @@ export default function App() {
     setError(null);
     try {
       const session = await api.demoSession(userId);
+      const [membershipResult, manageableResult] = await Promise.all([
+        api.teamMemberships(),
+        api.manageableTeamMemberships(),
+      ]);
       setActor(session.user);
+      setMemberships(membershipResult.memberships);
+      setManageableMemberships(manageableResult.memberships);
       setSelectedId(null);
       setMessages([]);
       setActiveRun(null);
@@ -288,6 +309,58 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const addTeamMembership = async (input: {
+    memberId: HumanId;
+    teamId: TeamId;
+    role: TeamRole;
+  }) => {
+    setError(null);
+    try {
+      const { membership } = await api.addTeamMembership(input);
+      if (membership.humanId === actor?.id) {
+        setMemberships((current) =>
+          current.some(
+            (candidate) =>
+              candidate.teamId === membership.teamId && candidate.humanId === membership.humanId,
+          )
+            ? current
+            : [...current, membership],
+        );
+      }
+      setManageableMemberships((current) =>
+        current.some(
+          (candidate) =>
+            candidate.teamId === membership.teamId && candidate.humanId === membership.humanId,
+        )
+          ? current
+          : [...current, membership],
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const removeTeamMembership = async (input: { memberId: HumanId; teamId: TeamId }) => {
+    setError(null);
+    try {
+      const { membership } = await api.removeTeamMembership(input);
+      setMemberships((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.teamId !== membership.teamId || candidate.humanId !== membership.humanId,
+        ),
+      );
+      setManageableMemberships((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.teamId !== membership.teamId || candidate.humanId !== membership.humanId,
+        ),
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
@@ -450,6 +523,16 @@ export default function App() {
         </div>
 
         <DemoActorSwitch actor={actor} disabled={busy} onSwitch={switchActor} />
+
+        <TeamMembershipPanel
+          actor={actor}
+          users={users}
+          memberships={memberships}
+          manageableMemberships={manageableMemberships}
+          disabled={busy}
+          onAdd={addTeamMembership}
+          onRemove={removeTeamMembership}
+        />
 
         <button
           className="button button-primary create-button"

@@ -82,13 +82,20 @@ function seedDatabase(database: Database, seedDestinations = true): Database {
     }
   }
   for (const membership of DEMO_TEAM_MEMBERSHIPS) {
-    if (
-      !database.teamMemberships.some(
-        (item) =>
-          item.teamId === membership.teamId && item.humanId === membership.humanId,
-      )
-    ) {
+    const existing = database.teamMemberships.find(
+      (item) =>
+        item.teamId === membership.teamId && item.humanId === membership.humanId,
+    );
+    if (!existing) {
       database.teamMemberships.push(structuredClone(membership));
+    } else if (
+      membership.teamId === "team-beta" &&
+      membership.humanId === "user-b" &&
+      existing.role === "editor"
+    ) {
+      // Upgrade the original demo fixture without changing memberships added
+      // through the UI.
+      existing.role = "admin";
     }
   }
   if (seedDestinations) {

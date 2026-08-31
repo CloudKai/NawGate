@@ -10,6 +10,9 @@ import type {
   SystemInfo,
   SecurityLabResult,
   SecurityLabScenario,
+  TeamId,
+  TeamMembership,
+  TeamRole,
 } from "./types";
 
 export class ApiError extends Error {
@@ -72,6 +75,21 @@ export const api = {
     humanSessionToken = session.sessionToken;
     return session;
   },
+  demoUsers: () => request<{ users: { id: HumanId; name: string }[] }>("/api/demo/users"),
+  teamMemberships: () =>
+    request<{ memberships: TeamMembership[] }>("/api/demo/me/team-memberships"),
+  manageableTeamMemberships: () =>
+    request<{ memberships: TeamMembership[] }>("/api/demo/team-memberships"),
+  addTeamMembership: (body: { memberId: HumanId; teamId: TeamId; role: TeamRole }) =>
+    request<{ membership: TeamMembership }>("/api/demo/team-memberships", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeTeamMembership: (body: { memberId: HumanId; teamId: TeamId }) =>
+    request<{ membership: TeamMembership }>("/api/demo/team-memberships/remove", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   approvals: (id: string, status?: ApprovalRecord["status"]) =>
     request<{ approvals: ApprovalRecord[] }>(
       "/api/agents/" + id + "/approvals" +

@@ -81,7 +81,7 @@ describe("JsonStore", () => {
     expect(database.teamMemberships).toEqual([
       { teamId: "team-alpha", humanId: "user-a", role: "admin" },
       { teamId: "team-alpha", humanId: "user-b", role: "viewer" },
-      { teamId: "team-beta", humanId: "user-b", role: "editor" },
+      { teamId: "team-beta", humanId: "user-b", role: "admin" },
     ]);
     expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
       version: 7,
@@ -114,6 +114,40 @@ describe("JsonStore", () => {
     expect(store.snapshot().protectedResources).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "team-alpha-internal", type: "team_file" }),
+      ]),
+    );
+  });
+
+  it("upgrades the original User B Team Beta editor fixture to admin", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-beta-admin-test-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(filePath, JSON.stringify({
+      version: 7,
+      agents: [],
+      messages: [],
+      runs: [],
+      approvals: [],
+      auditEvents: [],
+      protectedResources: [],
+      deploymentStates: [],
+      actionExecutions: [],
+      teamMemberships: [
+        { teamId: "team-beta", humanId: "user-b", role: "editor" },
+      ],
+      agentTeamGrants: [],
+      capabilityClaims: [],
+      registeredDestinations: [],
+      destinationReceipts: [],
+      approvalAuthorities: [],
+    }), "utf8");
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot().teamMemberships).toEqual(
+      expect.arrayContaining([
+        { teamId: "team-beta", humanId: "user-b", role: "admin" },
       ]),
     );
   });

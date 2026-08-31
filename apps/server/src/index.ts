@@ -13,6 +13,7 @@ import { DestinationCatalogueService } from "./nawgate/destination-catalogue.js"
 import { ServerSideCredentialBroker } from "./nawgate/destination-broker.js";
 import { LocalDestinationAdapter } from "./nawgate/local-destination-adapter.js";
 import { SecurityLabService } from "./nawgate/security-lab-service.js";
+import { TeamMembershipService } from "./nawgate/team-membership-service.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
 import { createRunner } from "./runner-factory.js";
@@ -29,6 +30,7 @@ const approvals = new ApprovalService(store, audit);
 const authorities = new ApprovalAuthorityService(store, approvals, audit);
 const credentials = new RuntimeCredentialService(Date.now, config.codexTimeoutMs);
 const grants = new AgentTeamGrantService(store, approvals, credentials, audit);
+const memberships = new TeamMembershipService(store);
 const destinations = new DestinationCatalogueService(store, approvals);
 const destinationAdapter = new LocalDestinationAdapter(
   store,
@@ -59,6 +61,7 @@ const app = await createApp(config, service, identity, {
   approvals,
   audit,
   grants,
+  memberships,
   securityLab,
   authorities,
 });

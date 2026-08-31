@@ -1,10 +1,18 @@
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type HumanId = "user-a" | "user-b" | "user-c";
+export type TeamId = "team-alpha" | "team-beta";
+export type TeamRole = "viewer" | "editor" | "admin";
 
 export interface HumanPrincipal {
   id: HumanId;
   name: string;
+}
+
+export interface TeamMembership {
+  teamId: TeamId;
+  humanId: HumanId;
+  role: TeamRole;
 }
 
 export interface Agent {
@@ -223,4 +231,3 @@ export interface ReplayPayload {
   durationMs: number;
   auditEvents: AuditEvent[];
 }
-

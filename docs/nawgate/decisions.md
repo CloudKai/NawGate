@@ -95,7 +95,8 @@ stretch only.
 User-owned protected resources retain their hard owner check. Team-owned files
 use a separate relationship-and-attribute path so legitimate collaboration does
 not weaken the original User A/User B isolation proof. The first slice is
-read-only and supports fixed demo team roles; file mutation and enterprise
+read-only and uses a fixed demo team catalog; authenticated team admins can
+add demo human memberships from the Web UI. File mutation and enterprise
 group lifecycle remain out of scope.
 
 ## Persistent Agent grants do not replace Run identity
