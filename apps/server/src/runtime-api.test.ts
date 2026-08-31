@@ -3,18 +3,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { ApprovalService } from "./agentgate/approval-service.js";
-import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
-import { AuditService } from "./agentgate/audit-service.js";
-import { DeterministicPolicyEngine } from "./agentgate/policy-engine.js";
-import { ProtectedResourceService } from "./agentgate/protected-resource-service.js";
-import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
-import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
-import { SecurityLabService } from "./agentgate/security-lab-service.js";
-import { DestinationCatalogueService } from "./agentgate/destination-catalogue.js";
-import { LocalDestinationAdapter } from "./agentgate/local-destination-adapter.js";
-import { ServerSideCredentialBroker } from "./agentgate/destination-broker.js";
-import { CONTENT_DESTINATIONS } from "./agentgate/content-model.js";
+import { ApprovalService } from "./nawgate/approval-service.js";
+import { AgentTeamGrantService } from "./nawgate/agent-team-grant-service.js";
+import { AuditService } from "./nawgate/audit-service.js";
+import { DeterministicPolicyEngine } from "./nawgate/policy-engine.js";
+import { ProtectedResourceService } from "./nawgate/protected-resource-service.js";
+import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
+import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
+import { SecurityLabService } from "./nawgate/security-lab-service.js";
+import { DestinationCatalogueService } from "./nawgate/destination-catalogue.js";
+import { LocalDestinationAdapter } from "./nawgate/local-destination-adapter.js";
+import { ServerSideCredentialBroker } from "./nawgate/destination-broker.js";
+import { CONTENT_DESTINATIONS } from "./nawgate/content-model.js";
 import { createApp, type RuntimeApiDependencies } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { AgentService } from "./agent-service.js";
@@ -63,7 +63,7 @@ async function makeRuntimeApp(
   grants: AgentTeamGrantService;
   root: string;
 }> {
-  const root = await mkdtemp(path.join(tmpdir(), "agentgate-runtime-api-test-"));
+  const root = await mkdtemp(path.join(tmpdir(), "nawgate-runtime-api-test-"));
   temporaryDirectories.push(root);
   const store = new JsonStore(path.join(root, "db.json"));
   await store.initialize();
@@ -132,7 +132,7 @@ async function makeRuntimeApp(
     loadConfig({
       NODE_ENV: "test",
       APP_AUTH_TOKEN: "outer-token-for-tests",
-      AGENTGATE_SECURITY_LAB_ENABLED: options.securityLabEnabled === false ? "false" : "true",
+      NAWGATE_SECURITY_LAB_ENABLED: options.securityLabEnabled === false ? "false" : "true",
     }),
     service,
     undefined,
@@ -144,7 +144,7 @@ async function makeRuntimeApp(
 }
 
 function runtimeHeaders(token: string) {
-  return { "x-agentgate-runtime": token };
+  return { "x-nawgate-runtime": token };
 }
 
 describe("Runtime API boundary", () => {
@@ -176,7 +176,7 @@ describe("Runtime API boundary", () => {
     const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
     const headers = {
       authorization: "Bearer outer-token-for-tests",
-      "x-agentgate-session": sessionToken,
+      "x-nawgate-session": sessionToken,
     };
     const runtime = success.runtime.credentials.issue(agentAId, runAId, "user-a");
     const publish = {
@@ -196,7 +196,7 @@ describe("Runtime API boundary", () => {
     const pending = await success.app.inject({
       method: "POST",
       url: "/api/runtime/actions",
-      headers: { "x-agentgate-runtime": runtime.token },
+      headers: { "x-nawgate-runtime": runtime.token },
       payload: publish,
     });
     expect(pending.statusCode).toBe(202);
@@ -212,7 +212,7 @@ describe("Runtime API boundary", () => {
     const completed = await success.app.inject({
       method: "POST",
       url: "/api/runtime/actions",
-      headers: { "x-agentgate-runtime": runtime.token },
+      headers: { "x-nawgate-runtime": runtime.token },
       payload: { ...publish, approvalId },
     });
     expect(completed.statusCode).toBe(200);
@@ -248,7 +248,7 @@ describe("Runtime API boundary", () => {
     const failurePending = await failure.app.inject({
       method: "POST",
       url: "/api/runtime/actions",
-      headers: { "x-agentgate-runtime": failureRuntime.token },
+      headers: { "x-nawgate-runtime": failureRuntime.token },
       payload: { ...publish, requestId: "00000000-0000-4000-8000-000000000012" },
     });
     const failureApprovalId = (failurePending.json() as { approvalId: string }).approvalId;
@@ -257,13 +257,13 @@ describe("Runtime API boundary", () => {
       url: "/api/approvals/" + failureApprovalId + "/approve",
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": failureSessionToken,
+        "x-nawgate-session": failureSessionToken,
       },
     });
     const failed = await failure.app.inject({
       method: "POST",
       url: "/api/runtime/actions",
-      headers: { "x-agentgate-runtime": failureRuntime.token },
+      headers: { "x-nawgate-runtime": failureRuntime.token },
       payload: {
         ...publish,
         requestId: "00000000-0000-4000-8000-000000000012",
@@ -292,7 +292,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
       payload: { scenario: "own-project" },
     });
@@ -307,7 +307,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": "not-used-by-demo",
+        "x-nawgate-session": "not-used-by-demo",
       },
       payload: { scenario: "own-project" },
     });
@@ -325,7 +325,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
       payload: { scenario: "own-project" },
     });
@@ -345,7 +345,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/security-lab`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
       payload: { scenario: "forged-team-admin" },
     });
@@ -369,7 +369,7 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-a" },
     });
     const sessionToken = (session.json() as { sessionToken: string }).sessionToken;
-    const headers = { authorization: "Bearer outer-token-for-tests", "x-agentgate-session": sessionToken };
+    const headers = { authorization: "Bearer outer-token-for-tests", "x-nawgate-session": sessionToken };
     const started = await app.inject({
       method: "POST",
       url: `/api/agents/${agentAId}/security-lab`,
@@ -380,7 +380,7 @@ describe("Runtime API boundary", () => {
     const initial = started.json() as { scenarioId: string; approvalId: string; runId: string; status: string };
     expect(initial).toMatchObject({ status: "approval_required" });
     expect(initial.scenarioId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(JSON.stringify(initial)).not.toContain("x-agentgate-runtime");
+    expect(JSON.stringify(initial)).not.toContain("x-nawgate-runtime");
 
     await runtime.approvals.approve(initial.approvalId, "user-a");
     const completed = await app.inject({
@@ -409,7 +409,7 @@ describe("Runtime API boundary", () => {
     });
     const headers = {
       authorization: "Bearer outer-token-for-tests",
-      "x-agentgate-session": (session.json() as { sessionToken: string }).sessionToken,
+      "x-nawgate-session": (session.json() as { sessionToken: string }).sessionToken,
     };
     const queued = await app.inject({
       method: "POST",
@@ -452,7 +452,7 @@ describe("Runtime API boundary", () => {
       const session = await value.app.inject({
         method: "POST", url: "/api/demo/session", headers: { authorization: "Bearer outer-token-for-tests" }, payload: { userId: "user-a" },
       });
-      const headers = { authorization: "Bearer outer-token-for-tests", "x-agentgate-session": (session.json() as { sessionToken: string }).sessionToken };
+      const headers = { authorization: "Bearer outer-token-for-tests", "x-nawgate-session": (session.json() as { sessionToken: string }).sessionToken };
       const response = await value.app.inject({ method: "POST", url: `/api/agents/${agentAId}/security-lab`, headers, payload: { scenario: "alpha-restricted-jit" } });
       const body = response.json() as { scenarioId: string; approvalId: string; runId: string };
       await value.runtime.approvals.approve(body.approvalId, "user-a");
@@ -755,7 +755,7 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-a" },
     });
     const actorAToken = (actorASession.json() as { sessionToken: string }).sessionToken;
-    const actorAHeaders = { ...authHeaders, "x-agentgate-session": actorAToken };
+    const actorAHeaders = { ...authHeaders, "x-nawgate-session": actorAToken };
 
     const enrolled = await app.inject({
       method: "POST",
@@ -798,7 +798,7 @@ describe("Runtime API boundary", () => {
       payload: { userId: "user-b" },
     });
     const actorBToken = (actorBSession.json() as { sessionToken: string }).sessionToken;
-    const actorBHeaders = { ...authHeaders, "x-agentgate-session": actorBToken };
+    const actorBHeaders = { ...authHeaders, "x-nawgate-session": actorBToken };
     const crossOwner = await app.inject({
       method: "GET",
       url: `/api/agents/${agentAId}/team-grants`,
@@ -845,7 +845,7 @@ describe("Runtime API boundary", () => {
       url: `/api/agents/${agentAId}/revoke-access`,
       headers: {
         authorization: "Bearer outer-token-for-tests",
-        "x-agentgate-session": sessionToken,
+        "x-nawgate-session": sessionToken,
       },
     });
     expect(revoked.statusCode).toBe(200);
@@ -887,7 +887,7 @@ describe("Runtime API boundary", () => {
     const approvals = await app.inject({
       method: "GET",
       url: "/api/agents/" + agentId + "/approvals?status=pending",
-      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
     });
     expect(approvals.statusCode).toBe(200);
     expect(approvals.json()).toMatchObject({
@@ -897,7 +897,7 @@ describe("Runtime API boundary", () => {
     const audit = await app.inject({
       method: "GET",
       url: "/api/agents/" + agentId + "/audit?limit=10",
-      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
     });
     expect(audit.statusCode).toBe(200);
     expect(audit.json().audit).toEqual(
@@ -916,7 +916,7 @@ describe("Runtime API boundary", () => {
     const wrongOwner = await app.inject({
       method: "POST",
       url: "/api/approvals/" + pending.approvalId + "/approve",
-      headers: { ...authHeaders, "x-agentgate-session": actorBToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorBToken },
     });
     expect(wrongOwner.statusCode).toBe(403);
     expect(wrongOwner.json()).toMatchObject({ code: "APPROVAL_NOT_OWNED" });
@@ -931,7 +931,7 @@ describe("Runtime API boundary", () => {
     const approved = await app.inject({
       method: "POST",
       url: "/api/approvals/" + pending.approvalId + "/approve",
-      headers: { ...authHeaders, "x-agentgate-session": actorAToken },
+      headers: { ...authHeaders, "x-nawgate-session": actorAToken },
     });
     expect(approved.statusCode).toBe(200);
     expect(approved.json()).toMatchObject({ approval: { status: "approved" } });

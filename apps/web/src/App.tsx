@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
-import { AgentGatePanel } from "./components/agentgate/AgentGatePanel";
-import { DemoActorSwitch } from "./components/agentgate/DemoActorSwitch";
+import { NawGatePanel } from "./components/nawgate/NawGatePanel";
+import { DemoActorSwitch } from "./components/nawgate/DemoActorSwitch";
 import type {
   Agent,
   AgentTeamGrant,
@@ -659,7 +659,7 @@ export default function App() {
                     <div className="thinking-row">
                       <Spinner />
                       {approvals.length > 0
-                        ? "AgentGate is waiting for owner approval…"
+                        ? "NawGate is waiting for owner approval…"
                         : "Codex is reading, editing, or running commands…"}
                     </div>
                   </article>
@@ -715,7 +715,7 @@ export default function App() {
               </form>
             </section>
 
-            <AgentGatePanel
+            <NawGatePanel
               agent={selected}
               approvals={approvals}
               approvalHistory={approvalHistory}

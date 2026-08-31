@@ -7,18 +7,18 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
-import { ApprovalError, ApprovalService } from "./agentgate/approval-service.js";
-import { ApprovalAuthorityService } from "./agentgate/approval-authority-service.js";
-import { AgentTeamGrantService } from "./agentgate/agent-team-grant-service.js";
-import { AuditService } from "./agentgate/audit-service.js";
-import { IdentityService } from "./agentgate/identity-service.js";
-import { RuntimeCredentialService } from "./agentgate/runtime-credential-service.js";
-import { RuntimeGateway } from "./agentgate/runtime-gateway.js";
+import { ApprovalError, ApprovalService } from "./nawgate/approval-service.js";
+import { ApprovalAuthorityService } from "./nawgate/approval-authority-service.js";
+import { AgentTeamGrantService } from "./nawgate/agent-team-grant-service.js";
+import { AuditService } from "./nawgate/audit-service.js";
+import { IdentityService } from "./nawgate/identity-service.js";
+import { RuntimeCredentialService } from "./nawgate/runtime-credential-service.js";
+import { RuntimeGateway } from "./nawgate/runtime-gateway.js";
 import {
   SECURITY_LAB_SCENARIOS,
   SecurityLabService,
-} from "./agentgate/security-lab-service.js";
-import { AGENTGATE_POLICY_VERSION, type GatewayResult, type TrustedRuntimeContext } from "./agentgate/types.js";
+} from "./nawgate/security-lab-service.js";
+import { NAWGATE_POLICY_VERSION, type GatewayResult, type TrustedRuntimeContext } from "./nawgate/types.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
@@ -91,7 +91,7 @@ function runtimeContext(
   request: { headers: Record<string, string | string[] | undefined> },
   runtime: RuntimeApiDependencies,
 ): TrustedRuntimeContext | null {
-  const header = request.headers["x-agentgate-runtime"];
+  const header = request.headers["x-nawgate-runtime"];
   const token = typeof header === "string" ? header : undefined;
   const resolved = runtime.credentials.resolve(token);
   if (resolved.status === "valid") return resolved.context;
@@ -222,8 +222,8 @@ export async function createApp(
       redact: [
         "req.headers.authorization",
         "req.headers.cookie",
-        "req.headers.x-agentgate-session",
-        "req.headers.x-agentgate-runtime",
+        "req.headers.x-nawgate-session",
+        "req.headers.x-nawgate-runtime",
       ],
       ...(loggerStream ? { stream: loggerStream } : {}),
     },
@@ -269,8 +269,8 @@ export async function createApp(
 
   const humanActor = (request: { headers: Record<string, string | string[] | undefined> }) =>
     identity.requireSession(
-      typeof request.headers["x-agentgate-session"] === "string"
-        ? request.headers["x-agentgate-session"]
+      typeof request.headers["x-nawgate-session"] === "string"
+        ? request.headers["x-nawgate-session"]
         : undefined,
     );
 
@@ -365,7 +365,7 @@ export async function createApp(
         capabilityId: null,
         status: "success",
         durationMs: null,
-        policyVersion: AGENTGATE_POLICY_VERSION,
+        policyVersion: NAWGATE_POLICY_VERSION,
         explanation: "The owner revoked the active Run authority; future protected requests fail closed.",
         enforcementPoint: "RuntimeGateway",
         protectedActionExecuted: false,
@@ -420,7 +420,7 @@ export async function createApp(
           capabilityId: null,
           status: "failure",
           durationMs: null,
-          policyVersion: AGENTGATE_POLICY_VERSION,
+          policyVersion: NAWGATE_POLICY_VERSION,
           explanation: "The RuntimeGateway API boundary rejected untrusted malformed request attributes.",
           enforcementPoint: "RuntimeGateway/API boundary",
           protectedActionExecuted: false,

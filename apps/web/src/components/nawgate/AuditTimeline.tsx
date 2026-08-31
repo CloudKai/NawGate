@@ -1,0 +1,60 @@
+import type { AuditEvent } from "../../types";
+
+interface AuditTimelineProps {
+  events: AuditEvent[];
+}
+
+function label(value: string | null): string {
+  return value ? value.replaceAll("_", " ") : "—";
+}
+
+function decisionLabel(event: AuditEvent): string {
+  const labels: Record<string, string> = {
+    "policy.allow": "ALLOW",
+    "policy.deny": "DENY",
+    "policy.approval_required": "APPROVAL REQUIRED",
+    "approval.approved": "APPROVED",
+    "approval.denied": "DENIED",
+    "approval.expired": "EXPIRED",
+    "approval.revoked": "APPROVAL REVOKED",
+    "runtime_identity.issued": "RUN IDENTITY ISSUED",
+    "runtime_identity.revoked": "RUN IDENTITY REVOKED",
+    "capability.issued": "CAPABILITY ISSUED",
+    "capability.consumed": "CAPABILITY CONSUMED",
+    "protected_action.succeeded": "SUCCESS",
+    "protected_action.failed": "FAILURE",
+  };
+  return labels[event.eventType] ?? (event.status === "failure" ? "FAILURE" : label(event.eventType));
+}
+
+export function AuditTimeline({ events }: AuditTimelineProps) {
+  const latest = [...events].reverse().slice(0, 8);
+  if (latest.length === 0) {
+    return (
+      <p className="nawgate-empty">No NawGate decisions yet. Run a protected action to generate evidence.</p>
+    );
+  }
+  return (
+    <ol className="audit-timeline">
+      {latest.map((event) => (
+        <li key={event.id} className="audit-event">
+          <span className={"audit-event-dot audit-dot-" + event.status} />
+          <div className="audit-event-copy">
+            <div className="audit-event-heading">
+              <strong>{decisionLabel(event)}</strong>
+              <time>{new Date(event.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+            </div>
+            <span>{label(event.action)} · {label(event.resourceId)} · {label(event.reasonCode)}</span>
+            {event.explanation && <p className="audit-explanation">{event.explanation}</p>}
+            {(event.policyVersion || event.enforcementPoint) && (
+              <small>
+                {event.policyVersion ?? "No policy version"} · {event.enforcementPoint ?? "Unknown enforcement point"}
+                {event.protectedActionExecuted === true ? " · side effect executed" : " · no side effect"}
+              </small>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}

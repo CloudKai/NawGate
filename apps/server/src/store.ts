@@ -7,20 +7,20 @@ import {
   isHumanId,
   isTeamId,
   isTeamRole,
-} from "./agentgate/demo-users.js";
+} from "./nawgate/demo-users.js";
 import {
   DEMO_REGISTERED_DESTINATIONS,
   isDestinationSideEffectReceipt,
   isRegisteredDestinationId,
   isRegisteredDestination,
-} from "./agentgate/destination-catalogue.js";
+} from "./nawgate/destination-catalogue.js";
 import {
   ApprovalAuthorityService,
   isApprovalAuthorityEligible,
-} from "./agentgate/approval-authority-service.js";
+} from "./nawgate/approval-authority-service.js";
 import type {
   AgentTeamGrant,
-  AgentGateAction,
+  NawGateAction,
   ApprovalAuthority,
   ApprovalAuthorityRole,
   ApprovalRecord,
@@ -28,7 +28,7 @@ import type {
   DeploymentState,
   TeamMembership,
   RiskTier,
-} from "./agentgate/types.js";
+} from "./nawgate/types.js";
 import type { Database } from "./types.js";
 
 const deploymentFixtures: readonly DeploymentState[] = [
@@ -373,7 +373,7 @@ function isValidApprovalRequirement(
     : count === 1 && roles.length === 1 && roles[0] === "owner";
 }
 
-function isRegisteredAction(value: unknown): value is AgentGateAction {
+function isRegisteredAction(value: unknown): value is NawGateAction {
   return value === "resource.read" ||
     value === "file.read" ||
     value === "deploy.staging" ||

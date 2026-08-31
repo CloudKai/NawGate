@@ -43,7 +43,7 @@ This repository's Bouncer implementation also demonstrates explicit Run
 authority revocation, one-use capability replay denial, strict identity-field
 rejection, policy-versioned explanations, and a safe Delegation Receipt. The
 registered-action scope and non-hardened container limitation are intentional;
-see [AgentGate architecture](agentgate/architecture.md).
+see [NawGate architecture](nawgate/architecture.md).
 
 ### Kill Switch: safety and sandboxing
 

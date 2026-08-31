@@ -12,7 +12,7 @@ credentials, personal data, or exploit details in an issue.
 ## Known limitations
 
 - Demo User A/User B/User C identities and backend Agent ownership are implemented for
-  the AgentGate proof of concept; this is not production tenant isolation or
+  the NawGate proof of concept; this is not production tenant isolation or
   an enterprise IAM system.
 - Team memberships and roles are deterministic demo fixtures reseeded in the
   local JSON store. Persistent Agent grants have a narrow demo admin surface,
@@ -22,7 +22,7 @@ credentials, personal data, or exploit details in an issue.
   Agent grant, Run authority, and resource threshold. Grant revocation also
   revokes current Run authority, but this is still a single-process POC rather
   than a distributed authorization service.
-- AgentGate protects only registered actions routed through `agentctl`; it does
+- NawGate protects only registered actions routed through `agentctl`; it does
   not intercept every internal Codex shell or file operation.
 - Explicit owner revocation invalidates active Run credentials and pending or
   approved one-use capabilities. It does not promise to terminate an

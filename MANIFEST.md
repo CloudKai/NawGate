@@ -22,5 +22,5 @@
 - `context/ui-registry.md`
 - `context/ui-rules.md`
 - `context/ui-tokens.md`
-- `design/agentgate-codejam.architecture.json`
-- `design/agentgate-codejam.workflow.json`
+- `design/nawgate-codejam.architecture.json`
+- `design/nawgate-codejam.workflow.json`

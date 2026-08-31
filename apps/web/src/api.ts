@@ -33,7 +33,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...(options?.body ? { "Content-Type": "application/json" } : {}),
     ...(authToken ? { Authorization: "Bearer " + authToken } : {}),
     ...(humanSessionToken
-      ? { "X-AgentGate-Session": humanSessionToken }
+      ? { "X-NawGate-Session": humanSessionToken }
       : {}),
     ...options?.headers,
   };

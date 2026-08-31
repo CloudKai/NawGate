@@ -15,8 +15,8 @@ flowchart LR
     Process --> Provider
 ```
 
-AgentGate is the selected Bouncer middleware track. Its public flow and trust
-boundaries are documented in [AgentGate architecture](agentgate/architecture.md).
+NawGate is the selected Bouncer middleware track. Its public flow and trust
+boundaries are documented in [NawGate architecture](nawgate/architecture.md).
 Each Run receives a short-lived backend-owned runtime identity. `PolicyEngine`
 decides, `RuntimeGateway` enforces, and protected actions are executed only
 behind the registered-resource boundary. Owner revocation invalidates the Run

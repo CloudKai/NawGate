@@ -10,7 +10,7 @@ import type {
   TeamMembership,
   RegisteredDestination,
   DestinationSideEffectReceipt,
-} from "./agentgate/types.js";
+} from "./nawgate/types.js";
 
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -70,7 +70,7 @@ export interface Database {
   actionExecutions: ActionExecutionRecord[];
   teamMemberships: TeamMembership[];
   agentTeamGrants: AgentTeamGrant[];
-  capabilityClaims: import("./agentgate/types.js").CapabilityClaim[];
+  capabilityClaims: import("./nawgate/types.js").CapabilityClaim[];
   registeredDestinations: RegisteredDestination[];
   destinationReceipts: DestinationSideEffectReceipt[];
   approvalAuthorities: ApprovalAuthority[];

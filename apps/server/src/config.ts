@@ -15,11 +15,11 @@ const envSchema = z.object({
     .default("workspace-write"),
   CODEX_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(600_000),
   CODEX_MAX_OUTPUT_BYTES: z.coerce.number().int().min(65_536).default(2_097_152),
-  AGENTGATE_GATEWAY_URL: z.string().url().optional(),
-  AGENTGATE_APPROVAL_WAIT_MS: z.coerce.number().int().min(1_000).default(90_000),
+  NAWGATE_GATEWAY_URL: z.string().url().optional(),
+  NAWGATE_APPROVAL_WAIT_MS: z.coerce.number().int().min(1_000).default(90_000),
   // `z.coerce.boolean()` treats every non-empty string (including "false") as true.
   // This demo-only endpoint must remain disabled unless explicitly enabled.
-  AGENTGATE_SECURITY_LAB_ENABLED: z
+  NAWGATE_SECURITY_LAB_ENABLED: z
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
@@ -67,8 +67,8 @@ export type AppConfig = ReturnType<typeof loadConfig>;
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
   const env = envSchema.parse(environment);
   const authToken = env.APP_AUTH_TOKEN?.trim() ?? "";
-  if (env.AGENTGATE_APPROVAL_WAIT_MS >= env.CODEX_TIMEOUT_MS) {
-    throw new Error("AGENTGATE_APPROVAL_WAIT_MS must be shorter than CODEX_TIMEOUT_MS");
+  if (env.NAWGATE_APPROVAL_WAIT_MS >= env.CODEX_TIMEOUT_MS) {
+    throw new Error("NAWGATE_APPROVAL_WAIT_MS must be shorter than CODEX_TIMEOUT_MS");
   }
   const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
   if (env.NODE_ENV === "production" && !loopbackHosts.has(env.HOST)) {
@@ -93,10 +93,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     codexSandboxMode: env.CODEX_SANDBOX_MODE,
     codexTimeoutMs: env.CODEX_TIMEOUT_MS,
     codexMaxOutputBytes: env.CODEX_MAX_OUTPUT_BYTES,
-    agentGateGatewayUrl:
-      env.AGENTGATE_GATEWAY_URL?.trim() || "http://127.0.0.1:" + env.PORT,
-    agentGateApprovalWaitMs: env.AGENTGATE_APPROVAL_WAIT_MS,
-    securityLabEnabled: env.AGENTGATE_SECURITY_LAB_ENABLED,
+    nawGateGatewayUrl:
+      env.NAWGATE_GATEWAY_URL?.trim() || "http://127.0.0.1:" + env.PORT,
+    nawGateApprovalWaitMs: env.NAWGATE_APPROVAL_WAIT_MS,
+    securityLabEnabled: env.NAWGATE_SECURITY_LAB_ENABLED,
     runtimeProvider: env.RUNTIME_PROVIDER,
     containerEngine: env.CONTAINER_ENGINE,
     containerRuntimeImage: env.CONTAINER_RUNTIME_IMAGE,

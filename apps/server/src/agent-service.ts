@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isModelConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
-import type { ApprovalService } from "./agentgate/approval-service.js";
-import type { HumanPrincipal } from "./agentgate/types.js";
+import type { ApprovalService } from "./nawgate/approval-service.js";
+import type { HumanPrincipal } from "./nawgate/types.js";
 import { JsonStore } from "./store.js";
 import type {
   Agent,

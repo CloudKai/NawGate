@@ -16,8 +16,8 @@ afterEach(async () => {
 });
 
 describe("WorkspaceManager", () => {
-  it("adds AgentGate discovery guidance without treating instructions as enforcement", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "agentgate-workspace-test-"));
+  it("adds NawGate discovery guidance without treating instructions as enforcement", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "nawgate-workspace-test-"));
     temporaryDirectories.push(root);
     const agent: Agent = {
       id: "agent-a",
@@ -36,7 +36,7 @@ describe("WorkspaceManager", () => {
     await workspaces.initialize();
     await workspaces.create(agent);
     const instructions = await readFile(path.join(agent.workspacePath, "AGENTS.md"), "utf8");
-    expect(instructions).toContain("## AgentGate protected actions");
+    expect(instructions).toContain("## NawGate protected actions");
     expect(instructions).toContain("agentctl resource read <resource-id>");
     expect(instructions).toContain("agentctl file read <resource-id>");
     expect(instructions).toContain("agentctl deploy production");

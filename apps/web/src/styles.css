@@ -877,7 +877,7 @@ textarea:focus {
   font-size: 8px;
 }
 
-.agentgate-panel {
+.nawgate-panel {
   margin-top: 18px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -886,8 +886,8 @@ textarea:focus {
   box-shadow: 0 12px 30px rgba(39, 38, 33, 0.05);
 }
 
-.agentgate-panel-heading,
-.agentgate-section-title,
+.nawgate-panel-heading,
+.nawgate-section-title,
 .approval-card-topline,
 .audit-event-heading {
   display: flex;
@@ -896,7 +896,7 @@ textarea:focus {
   gap: 12px;
 }
 
-.agentgate-panel-heading {
+.nawgate-panel-heading {
   margin-bottom: 18px;
 }
 
@@ -908,7 +908,7 @@ textarea:focus {
   background: #faf9ff;
 }
 
-.agentgate-help,
+.nawgate-help,
 .team-grant-history {
   display: block;
   margin: 0 0 10px;
@@ -986,7 +986,7 @@ textarea:focus {
   font-size: 10px;
 }
 
-.agentgate-panel-heading h2 {
+.nawgate-panel-heading h2 {
   margin: 4px 0 0;
   font-size: 17px;
 }
@@ -1005,24 +1005,24 @@ textarea:focus {
   background: var(--purple-soft);
 }
 
-.agentgate-grid {
+.nawgate-grid {
   display: grid;
   grid-template-columns: minmax(260px, 0.9fr) minmax(280px, 1.1fr);
   gap: 22px;
 }
 
-.agentgate-section-title {
+.nawgate-section-title {
   margin-bottom: 10px;
   color: #4c4d47;
   font-size: 11px;
 }
 
-.agentgate-section-title > span {
+.nawgate-section-title > span {
   color: #96968f;
   font-size: 9px;
 }
 
-.agentgate-empty {
+.nawgate-empty {
   margin: 0;
   color: var(--muted);
   font-size: 11px;
@@ -1608,7 +1608,7 @@ textarea:focus {
     padding: 22px 15px;
   }
 
-  .agentgate-grid {
+  .nawgate-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1616,7 +1616,7 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .agentgate-panel {
+  .nawgate-panel {
     padding: 15px;
   }
 
