@@ -1,6 +1,6 @@
-# AgentGate Observability & Replay Guide
+# NawGate Observability & Replay Guide
 
-This guide explains the **Data Loss Prevention (DLP Proxy)** and **Flight Data Recorder (Deterministic Run Replayer)** capabilities built into the **AgentGate** delegated-access middleware.
+This guide explains the **Data Loss Prevention (DLP Proxy)** and **Flight Data Recorder (Deterministic Run Replayer)** capabilities built into the **NawGate** delegated-access middleware.
 
 ---
 
@@ -11,7 +11,7 @@ Autonomous Agentic AI systems frequently read, generate, and execute code across
 1. **Sensitive Data Leakage**: Prompts, tool outputs, or assistant responses may accidentally expose API keys, bearer tokens, passwords, or PII into persistent databases and audit trails.
 2. **Nondeterministic Blackbox Failures**: When an agent fails or behaves unexpectedly, developers lack structured telemetry to reconstruct the run's exact prompt, token consumption, policy decisions, and execution duration.
 
-**AgentGate** solves both challenges with backend-enforced middleware:
+**NawGate** solves both challenges with backend-enforced middleware:
 
 | Feature | Primary Purpose | Enforcement Point |
 | :--- | :--- | :--- |
@@ -126,19 +126,19 @@ data/replays/<agent-id>/<run-id>.json
 ## 5. How to Use in the Web Application
 
 ### 1. DLP Status Indicator
-In the top-right header of the **AgentGate Panel**, you will see the active status chip:
+In the top-right header of the **NawGate Panel**, you will see the active status chip:
 - **`🔒 DLP Active`** (with green pulsing indicator)
 - Confirms real-time secret sanitization is active across all conversations and audit trails.
 
 ### 2. Inspecting a Run via Flight Replay
 1. Navigate to an Agent in the Launchpad.
-2. In the right-hand **AgentGate Panel**, locate the **Audit Timeline**.
+2. In the right-hand **NawGate Panel**, locate the **Audit Timeline**.
 3. Next to any decision or run event, click the **`▶ Replay`** button.
 4. The **Deterministic Run Replay Modal** opens with:
    - **Status & Duration**: High-precision execution duration (e.g. `3.20s` or `450ms`).
    - **Token Consumption**: Input tokens, cached tokens, and output tokens.
    - **Sanitized Prompt & Output**: Complete interaction history with secrets masked.
-   - **Decision Trail**: The exact sequence of AgentGate policy decisions, approvals, and capability leases.
+   - **Decision Trail**: The exact sequence of NawGate policy decisions, approvals, and capability leases.
 
 ---
 
@@ -149,7 +149,7 @@ In the top-right header of the **AgentGate Panel**, you will see the active stat
 **Situation**: A developer tests the agent by pasting a prompt containing a production key and sensitive email:
 > *"Use my key `sk-proj-98765432101234567890abcdef` to check server status for `alice.dev@company.com`."*
 
-**What AgentGate Does**:
+**What NawGate Does**:
 1. `DLP Proxy` intercepts the string in `AgentService.sendMessage()`.
 2. The message stored in the database and shown in the playground is sanitized to:
    > *"Use my key `[REDACTED_OPENAI_KEY]` to check server status for `[REDACTED_EMAIL]`."*
@@ -161,7 +161,7 @@ In the top-right header of the **AgentGate Panel**, you will see the active stat
 
 **Situation**: An Agent fails while executing a deployment task. The user sees a `Run failed` banner.
 
-**What AgentGate Does**:
+**What NawGate Does**:
 1. `MiddlewareRunner` catches the failure in its lifecycle handler.
 2. The exact error, timing, token usage, and audit records are recorded into `data/replays/<agentId>/<runId>.json`.
 3. The user clicks **`▶ Replay`** on the failure event in the Audit Timeline.
@@ -178,9 +178,9 @@ In the top-right header of the **AgentGate Panel**, you will see the active stat
 
 **Situation**: `User A` and `User B` share the platform. `User B` tries to inspect `User A`'s flight recordings.
 
-**What AgentGate Does**:
+**What NawGate Does**:
 1. `User B` sends a request to `GET /api/agents/<agent-a-id>/replays/<run-id>`.
-2. Fastify backend evaluates the session token `X-AgentGate-Session`.
+2. Fastify backend evaluates the session token `X-NawGate-Session`.
 3. `service.getAgent(id, actor)` detects that `agent-a` is owned by `user-a` (`ownerUserId !== actor.id`).
 4. The request fails closed with HTTP `404 Agent not found`.
 5. No telemetry, prompt text, or token data is exposed across tenant boundaries.
@@ -193,10 +193,10 @@ To run the automated test suite for DLP and Flight Recorder:
 
 ```bash
 # Run DLP unit tests
-npx vitest run apps/server/src/agentgate/dlp-service.test.ts
+npx vitest run apps/server/src/nawgate/dlp-service.test.ts
 
 # Run Flight Recorder unit tests
-npx vitest run apps/server/src/agentgate/flight-recorder.test.ts
+npx vitest run apps/server/src/nawgate/flight-recorder.test.ts
 
 # Run Runtime API integration tests
 npx vitest run apps/server/src/runtime-api.test.ts

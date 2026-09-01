@@ -421,8 +421,7 @@ about the host Agent Runtime executable, not the Ark/OpenAI API key.
 | `CONTAINER_PIDS_LIMIT` | `256` | Process limit per Runtime container. |
 
 See [.env.example](.env.example) for build mirror, package, user, and instance
-overrides. The legacy `AGENTGATE_*` environment names are not supported; use
-`NAWGATE_*`.
+overrides. Pre-rename environment aliases are not supported; use `NAWGATE_*`.
 
 ## Troubleshooting
 

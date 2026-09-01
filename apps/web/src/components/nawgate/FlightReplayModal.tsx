@@ -107,7 +107,7 @@ export function FlightReplayModal({ replay, loading, error, onClose }: FlightRep
 
             {replay.auditEvents.length > 0 && (
               <section className="replay-section">
-                <span className="section-label">AgentGate Decision Trail ({replay.auditEvents.length} events)</span>
+                <span className="section-label">NawGate Decision Trail ({replay.auditEvents.length} events)</span>
                 <div className="replay-audit-list">
                   {replay.auditEvents.map((evt) => (
                     <div key={evt.id} className="replay-audit-item">
@@ -121,7 +121,7 @@ export function FlightReplayModal({ replay, loading, error, onClose }: FlightRep
                         <small>
                           {evt.action ? `action: ${evt.action} · ` : ""}
                           {evt.resourceId ? `resource: ${evt.resourceId} · ` : ""}
-                          {evt.enforcementPoint ?? "AgentGate"}
+                          {evt.enforcementPoint ?? "NawGate"}
                         </small>
                       </div>
                     </div>
