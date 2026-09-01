@@ -1,512 +1,161 @@
-# NawGate complete demo script
+# NawGate Demo Steps
 
-This guide contains the exact startup commands, Playground prompts, UI actions,
-expected results, and suggested narration for demonstrating NawGate. Use the
-three-minute core path for judges, then continue into multi-agent coordination,
-observability replaying, and extended security checks if time permits.
+For the required three-minute demonstration, use sections 1, 2, 5, and 6 to
+show a real Agent Run, DLP, an allowed action, a hard denial, approval, and
+audit evidence. Add sections 3 and 4 plus the extended abuse checks when four
+to five minutes are available.
 
----
+## Before recording
 
-## 1. Start the local POC
+1. Start the application and open `http://localhost:3000`.
+2. Confirm the runtime is working and the NawGate panel shows **Audit status:
+   Verified**.
+3. For the UI-based authorization demo, enable the Security Lab. The local POC
+   enables it automatically. When using development mode, set:
 
-NawGate's backend-enforced delegated-access demo requires Node.js 22 or newer
-and a running Docker, Colima, or Podman engine. The model provider may be Ark
-or an OpenAI-compatible provider.
+   ```env
+   NAWGATE_SECURITY_LAB_ENABLED=true
+   ```
 
-From the repository root, create `.env` once if it does not already exist:
+   Restart the server after changing `.env`.
+4. Prepare User A and at least two Agents. For the team demo, enroll one
+   Frontend Agent and one Backend Agent into the same team, such as
+   `team-alpha`.
 
-```bash
-test -f .env || cp .env.example .env
-openssl rand -hex 24
-```
+For protected-action prompts using `agentctl`, use the disposable container
+Runtime started by `npm run poc`. `agentctl` is installed inside that Runtime,
+not on the host machine. This script uses the Security Lab instead, so the
+authorization and approval section can be demonstrated directly in the UI.
 
-Paste the generated value into `APP_AUTH_TOKEN`, choose `MODEL_PROVIDER=ark`
-or `MODEL_PROVIDER=openai-compatible`, and fill the matching key/model fields.
-The current template deliberately leaves host paths, gateway, engine, and
-Runtime instance ID unset so the POC can choose safe values.
+## 1. Introduction: identity and ownership
 
-### macOS with Homebrew
+1. Select **User A** in **Acting as**.
+2. Show User A's Agent list and NawGate panel.
+3. Confirm User A can access their Agent.
+4. Optionally switch to User B and confirm User A's private Agent is not visible.
 
-Install Node.js 22 once if it is not already installed:
+## 2. Workspace persistence and DLP
 
-```bash
-brew install node@22
-```
-
-From the repository root, run:
-
-```bash
-export PATH="$(brew --prefix node@22)/bin:$PATH"
-hash -r
-node --version
-
-set -a
-source .env
-set +a
-
-npm run poc
-```
-
-Do not add trailing `\` characters between these commands. A trailing `\`
-joins the next line into the same shell command.
-
-### Linux or macOS with nvm
-
-```bash
-nvm use 22
-
-set -a
-source .env
-set +a
-
-npm run poc
-```
-
-Keep this terminal running throughout the browser demonstration. The first run
-may take longer because it installs dependencies and builds the Runtime image.
-
-If port 3000 may already be running, check it first:
-
-```bash
-curl http://localhost:3000/api/health
-lsof -nP -iTCP:3000 -sTCP:LISTEN
-```
-
-If the health endpoint succeeds, use the existing instance. Otherwise, stop
-only the stale PID reported by `lsof`, then start the POC again:
-
-```bash
-kill <PID>
-```
-
-Open `http://localhost:3000`. Enter the same `APP_AUTH_TOKEN` configured in
-`.env`; do not display the token during the presentation.
-
----
-
-## 2. Create the demo Agents
-
-### 2.1 Baseline Security Agent
-
-Select **Create Agent** and enter:
-
-- **Name**: `NawGate Demo Agent`
-- **Description**: `Demonstrates backend-enforced delegated access`
-- **Instructions**:
-
-```text
-Execute commands I explicitly request. Never simulate command output. Explain the result briefly without exposing credentials or protected payloads.
-```
-
-Suggested narration:
-
-> This Agent has its own persistent workspace, but it does not decide its own
-> permissions. NawGate derives the Human, Agent, and Run identities on the
-> backend.
-
-### 2.2 Multi-Agent Team Agents (for Coordination Demo)
-
-Create two specialized agents to showcase multi-agent collaboration:
-
-1. **Frontend Agent**:
-   - **Name**: `Frontend Builder`
-   - **Description**: `Specializes in React UI components, landing pages, and responsive design`
-   - **Instructions**: `Build frontend components and landing pages in this workspace.`
-2. **Backend Agent**:
-   - **Name**: `Backend Engineer`
-   - **Description**: `Specializes in Fastify API routes, auth schemas, and server contracts`
-   - **Instructions**: `Implement backend services, routing, and data contracts in this workspace.`
-
-In the right-hand **NawGate Panel**, go to **Team Grants** for each agent and enroll both in `team-alpha` with the `Editor` role.
-
----
-
-## 3. Playground, multi-turn continuity & Real-Time DLP sanitization
-
-### 3.1 Workspace persistence and multi-turn execution
-
-Select `NawGate Demo Agent` and send this first message:
+1. Select the same Agent in User A's Playground.
+2. Send:
 
 ```text
 Create demo.txt containing "NawGate multi-turn demo", then read it back and tell me what you created.
 ```
 
-After it completes, send this second message to the same Agent:
+3. After the Run completes, send:
 
 ```text
 Continue the previous task. Append "second turn confirmed" to demo.txt, then show me the final contents.
 ```
 
-Expected result:
-
-- both Runs complete;
-- the same Agent workspace is reused;
-- the second message resumes the same conversation;
-- `demo.txt` contains both lines.
-
-Suggested narration:
-
-> Normal Agent CRUD, workspace persistence, real model execution, and
-> multi-turn conversation work seamlessly alongside NawGate.
-
-### 3.2 Real-Time Data Loss Prevention (DLP Proxy)
-
-In the top-right header of the **NawGate Panel**, note the active status chip:
-- **`🔒 DLP Active`** (with pulsing green indicator)
-
-Send a prompt containing an accidental secret and sensitive email:
+4. Confirm the final response contains both lines.
+5. Send a demo-only fake secret and email:
 
 ```text
 Use my key sk-proj-98765432101234567890abcdef to check server status for dev-lead@company.com
 ```
 
-Expected result:
-
-- `DLPService` intercepts the input in real time before persistence;
-- the chat message in the UI and database displays:
-  `Use my key [REDACTED_OPENAI_KEY] to check server status for [REDACTED_EMAIL]`;
-- raw API keys and personal data are never written to disk, logs, or flight recordings.
-
-Suggested narration:
-
-> NawGate's deterministic DLP Proxy strips API keys, bearer tokens, private keys,
-> and PII before anything is persisted to the store or audit trails.
-
----
-
-## 4. Three-minute core NawGate security path
-
-The `agentctl` commands below must be requested from the Agent in the browser
-Playground. Do not run them in the host macOS or Linux terminal. The official
-container Runtime installs `agentctl` and injects a short-lived Run credential.
-
-### 4.1 Owner resource allow
-
-Send:
+6. Confirm the message is displayed as:
 
 ```text
-Run exactly this terminal command and return its output: agentctl resource read project-a
+Use my key [REDACTED_OPENAI_KEY] to check server status for [REDACTED_EMAIL]
 ```
 
-Expected result:
+## 3. Team membership and Agent enrollment
 
-- the Agent reports `ALLOW`;
-- the audit timeline shows `ALLOW` followed by `SUCCESS`;
-- the enforcement point is `RuntimeGateway`;
-- `side effect executed` is shown.
+1. Open the **Team Membership** control.
+2. Add a human user to **Team Alpha** as a **Viewer**.
+3. Show the membership card.
+4. Open **Persistent Team Agent Enrollment**.
 
-Suggested narration:
+Enroll the Frontend Agent and Backend Agent into `team-alpha`.
 
-> User A owns this resource. The model requested access, but the trusted
-> RuntimeGateway made and enforced the decision.
+## 4. Multi-Agent Execution Graph and Blackboard
 
-### 4.2 Cross-user hard denial
-
-Send:
+1. Select an Agent enrolled in Team Alpha.
+2. Send:
 
 ```text
-Run exactly this terminal command and return its output: agentctl resource read project-b
+Build a landing page with a login feature that redirects to a hello page. Assign no more than one parallel task to each Agent, then run a final integration task.
 ```
 
-Expected result:
+3. When the team run starts, open **Execution Graph**.
+4. Show the **Graph** tab.
+5. Show the **Blackboard** tab and its contracts, artifacts, and created files.
 
-- the command reports that the protected action was not permitted;
-- the audit timeline shows `DENY` and an owner-mismatch reason;
-- no protected side effect executes;
-- User B's protected payload is never displayed.
+Keep no more than one simultaneous task assigned to the same Agent. The runtime
+allows only one active Codex process per Agent; assigning two Phase 1 tasks to
+one Agent can cause one task to fail.
 
-Suggested narration:
+## 5. Authorization and approval through the UI
 
-> Approval cannot repair a hard cross-user denial. NawGate fails closed before
-> revealing protected information.
+1. While acting as User A, open **NawGate Panel → Security Lab**.
 
-### 4.3 Production approval and one-use authority
+2. Click **Own project** and confirm `ALLOW`.
 
-Send:
+3. Click **Cross-user deny** and confirm `DENY` with no protected side effect.
 
-```text
-Run exactly this terminal command: agentctl deploy production
-```
+4. Click **Alpha restricted JIT**.
+5. Wait for `REQUIRE_APPROVAL`.
+6. Optionally switch to User B and confirm the request cannot be approved by
+   the wrong user. Return to User A.
+7. Approve the request in **Needs your approval**.
+8. Return to the Security Lab result and click **Complete approved JIT**.
+9. Confirm the action succeeds once and the persistent Viewer role remains
+   unchanged.
 
-The Run should report:
+### Extended abuse and revocation checks
 
-```text
-Waiting for owner approval...
-```
+Run these after the core path when time permits:
 
-In **Needs your approval**, verify the high-risk request and `0 / 1` approval
-progress. Do not approve immediately.
+1. Click **Forged admin** and confirm the backend ignores the untrusted role
+   and Team claims.
+2. Click **Replay capability** and confirm the first use succeeds while replay
+   is denied.
+3. Click **Revoke Run** and confirm the follow-up action is denied.
+4. Click **Queued after revoke** and confirm an initially allowed action is
+   denied by the final recheck with no side effect.
+5. Click **Revoke grant** last and confirm follow-up Team access fails closed.
 
-Suggested narration:
+## 6. Audit evidence and replay
 
-> The deployment has not executed. The Agent cannot approve itself, and no
-> capability has been issued yet.
+1. Open **Audit Timeline** and confirm the status is **Verified**.
+2. Find a completed real Playground Run.
+3. Click **Replay**.
+4. Show the sanitized prompt and output, duration, token usage, and policy
+   decision trail.
 
-To demonstrate isolation, switch to **User B** and confirm that User A's Agent
-and approval are not visible. Switch back to **User A**, select the Agent, and
-approve the request before the approval wait expires.
+Use a completed normal Playground Run for Replay. Security Lab scenarios are
+synthetic security checks and may not create a Playground flight recording.
 
-Expected Agent output:
+## Troubleshooting
 
-```text
-NawGate: owner approved once -> ALLOW
-Deployment completed.
-```
+### “Codex CLI was not found”
 
-Expected audit evidence includes:
-
-- `APPROVAL REQUIRED`;
-- `APPROVED`;
-- `CAPABILITY ISSUED`;
-- `CAPABILITY CONSUMED`;
-- `SUCCESS`.
-
-Suggested narration:
-
-> Approval created an exact, short-lived, one-use capability bound to this
-> Human, Agent, Run, action, resource, and request.
-
----
-
-## 5. Multi-Agent Team Coordination, DAG Orchestration & Blackboard
-
-NawGate automatically detects when collaborating agents belong to the same team
-(e.g., `team-alpha`) and orchestrates work using a built-in Directed Acyclic Graph
-(DAG) engine and a Shared Team Blackboard.
-
-### 5.1 Parallel Full-Stack Execution & Shared Blackboard
-
-Send this command in `team-alpha`:
-
-```text
-Build a landing page with a login feature which after a successful login redirects the user to a hello page.
-```
-
-What to observe:
-
-1. **Parallel Execution**:
-   - Open the **Execution Graph** drawer.
-   - In **Phase 1**, `Backend Engineer` (Fastify auth API) and `Frontend Builder` (React login & landing UI) run **concurrently in parallel** (both pulsing blue).
-   - In **Phase 2**, the integration barrier waits until both Phase 1 tasks finish before running final verification.
-2. **Shared Team Blackboard**:
-   - Click the **Blackboard** tab in the drawer.
-   - **Published Schemas & Contracts**: View the `/login` and `/hello` redirection contracts published by the backend.
-   - **Created Workspace Files**: View all files generated across agent workspaces (`index.html`, `server.js`, `hello.html`, `styles.css`).
-   - The layout is fixed-width with word-wrapped code snippets and no horizontal overflow.
-
-Suggested narration:
-
-> NawGate's Zero-Config Team Orchestrator automatically plans dependencies, runs
-> independent subtasks concurrently in parallel, and shares contracts across
-> workspaces via the Blackboard ledger.
-
----
-
-## 6. Team membership and persistent Agent enrollment
-
-As **User A**, use the team controls in the sidebar:
-
-1. Add **User C** to **Team Alpha** as Viewer.
-2. Switch to User C and confirm Team Alpha appears in the membership card.
-3. Confirm User A's Agent remains hidden.
-4. Switch back to User A and select the Agent.
-
-Suggested narration:
-
-> Team membership does not transfer Agent ownership. Human membership,
-> persistent Agent enrollment, and temporary Run authority remain separate.
-
-In **Persistent Team Agent enrollment**, enroll the Agent in Team Alpha as
-`viewer`.
-
-Send:
-
-```text
-Run exactly this terminal command: agentctl file read team-alpha-internal
-```
-
-Expected: `ALLOW` with the active viewer grant.
-
-Then send:
-
-```text
-Run exactly this terminal command: agentctl file read team-beta-internal
-```
-
-Expected: `DENY`, because User A has no trusted Team Beta membership. A Team
-Alpha Agent grant cannot authorize a Team Beta resource.
-
----
-
-## 7. Complete Security Lab sequence
-
-The Security Lab exercises the real backend `RuntimeGateway`. It does not
-implement a second policy engine. Its synthetic credentials and protected
-payloads stay server-side, and terminal paths revoke their synthetic Run
-authority.
-
-Run the scenarios in this order. Completed result cards dismiss after roughly
-12 seconds, but their audit evidence remains.
-
-| Button | Expected result |
-| --- | --- |
-| **Own project** | `ALLOW`; protected side effect executes. |
-| **Cross-user deny** | `DENY`; owner mismatch; no side effect. |
-| **Alpha internal** | `ALLOW` with the persistent viewer grant. |
-| **Alpha restricted JIT** | `REQUIRE_APPROVAL`; no side effect before approval. |
-| **Beta cross-team** | `DENY`; missing trusted Team Beta relationship. |
-| **Forged admin** | `DENY`; injected role and team attributes are ignored. |
-| **Replay capability** | First use succeeds; fresh-request replay is denied as `capability_consumed`. |
-| **Revoke Run** | Follow-up request is denied because Run authority was revoked. |
-| **Queued after revoke** | Initial allow is paused; final recheck denies after revocation; no side effect. |
-| **Revoke grant** | Persistent enrollment is revoked and follow-up access fails closed. |
-
-Run **Revoke grant** last because it intentionally changes the Agent's durable
-Team Alpha enrollment.
-
-### Complete the restricted-file JIT flow
-
-1. Select **Alpha restricted JIT**.
-2. Confirm the result is `REQUIRE_APPROVAL`.
-3. Approve the resulting request in **Needs your approval**.
-4. Select **Complete approved JIT** in the Security Lab result.
-
-Expected result:
-
-- the exact restricted read succeeds once;
-- the capability is consumed;
-- the Agent's persistent role remains Viewer;
-- the synthetic Run authority is closed;
-- no credential or file payload appears in the UI.
-
-Suggested narration:
-
-> JIT authority elevates only this exact request. It does not mutate the
-> Agent's persistent Viewer role.
-
-### Final pre-side-effect recheck
-
-Select **Queued after revoke**.
-
-Suggested narration:
-
-> NawGate initially allowed the action, paused before execution, revoked the
-> authority, and checked again immediately before the side effect. The final
-> check denied the action, so nothing executed.
-
----
-
-## 8. Audit evidence, cryptographic chain integrity, and Flight Data Recorder replay
-
-### 8.1 Cryptographic Audit Verification
-
-Show the judge:
-
-- **Audit status**: `Verified` (cryptographic hash chain `nawgate-audit-v1`);
-- **Policy version**: `bouncer-v5`;
-- **Enforcement point**: `RuntimeGateway` or the identified trusted service;
-- **Side effect status**: whether a protected side effect executed;
-- **Safe reason codes & explanations**: sanitized without raw payloads;
-- **Delegation Receipt**: safe summary of granted scope.
-
-Suggested narration:
-
-> The audit chain is tamper-evident and cryptographically linked with SHA-256
-> hashes. It records trusted decisions, but never Runtime credentials or raw
-> secrets.
-
-### 8.2 Flight Data Recorder (Deterministic Run Replayer)
-
-In the **Audit Timeline**, locate any completed real Playground Run and click **`▶ Replay`**:
-
-The **Flight Replay Modal** displays:
-- **Execution Telemetry**: High-precision execution duration (e.g. `2.45s`).
-- **Token Consumption**: Input tokens, cached prompt tokens, and output tokens.
-- **Sanitized Interaction**: Full prompt and output with DLP-sanitized credentials.
-- **Policy Decision Trail**: The exact sequence of policy evaluations and authority leases.
-
-### 8.3 Multi-Tenant Replay Isolation
-
-Switch to **User B** and attempt to access User A's flight telemetry:
-- User A's agents, runs, and replay recordings are completely inaccessible.
-- API requests fail closed with HTTP `404 Not Found`.
-
----
-
-## 9. Optional content-governance commands
-
-These commands use synthetic registered content assets and destinations. They
-do not call a real TikTok API or contain production data.
-
-Ask the Agent to run each command exactly:
-
-```text
-Run exactly this terminal command: agentctl content moderate asset-user-a-video-1
-```
-
-```text
-Run exactly this terminal command: agentctl content disclose asset-user-a-video-1
-```
-
-```text
-Run exactly this terminal command: agentctl content publish asset-user-a-video-1
-```
-
-```text
-Run exactly this terminal command: agentctl content export asset-user-a-video-1
-```
-
-Moderation returns an aggregate result. Disclosure is limited to the
-backend-approved analytics scope. Publish and export use registered synthetic
-destinations and require approval. Safe destination receipts are persisted,
-while credentials and protected content remain backend-owned.
-
-### Dual-control verification
-
-The backend implements critical two-person approval for User A's
-`asset-user-a-video-2` publish request, requiring the owner and an independent
-Org A reviewer. Demonstrate this behavior through the focused backend test below:
+For local development, set `CODEX_BIN` to an existing absolute Codex path in
+`.env`, then restart the server. On macOS, verify it with:
 
 ```bash
-npm test -w @launchpad/server -- --run src/nawgate/phase5-dual-control.test.ts
+"$CODEX_BIN" --version
 ```
 
----
+For the full protected-action flow, start the container Runtime with
+`npm run poc` instead of using the local-process runner.
 
-## 10. Stop and verify the complete implementation
+### `agentctl` is not found
 
-Press `Ctrl+C` in the POC terminal. The startup script removes its temporary
-Runtime containers while preserving Agent workspaces and conversations.
+Do not run `agentctl` directly in the host terminal. It is copied into the
+Runtime image. The Security Lab is the UI-based alternative for demonstrating
+authorization and approval.
 
-Run the complete repository test and build suite from the repository root:
+### A task fails in the Execution Graph
 
-```bash
-npm run check
-```
+Check whether two parallel tasks were assigned to the same Agent. Use one task
+per Agent in each parallel phase, or add another specialized Agent.
 
-Expected result:
-- **27 passing test files**;
-- **168 passing tests** (plus 1 environment-gated skipped container test);
-- Successful TypeScript compilation and production builds for both `@launchpad/web` and `@launchpad/server`.
+### Audit writes are disabled
 
-Run the real container smoke test:
-
-```bash
-CONTAINER_ENGINE=docker npm run test:container
-```
-
-Use `CONTAINER_ENGINE=podman` when testing with Podman. The smoke test must
-actually use a running container engine before it may be reported as passing.
-
----
-
-## 11. Scope statement for judges
-
-End with this accurate limitation:
-
-> NawGate protects registered protected actions routed through its trusted
-> gateway. It does not claim to intercept every internal Codex shell command or
-> file operation. The authorization decision, capability lifecycle, protected
-> side effect, DLP sanitization, multi-agent DAG coordination, and redacted
-> audit evidence for registered actions are enforced by the backend rather than
-> by the model or UI.
+Pause the recording and resolve the audit integrity problem first. The demo
+should show **Verified**; do not present a broken audit chain as successful
+evidence.
