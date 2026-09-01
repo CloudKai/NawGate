@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Registered Protected-Action Authorization",
+    "locale": "en",
+    "output": "sequence.html",
+    "viewBox": [1320, 720],
+    "column_fit": "spread",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "trusted-runtime", "label": "Trusted Runtime identity", "focus": ["human", "web", "control", "runtime", "gateway"], "note": "The backend resolves the short-lived credential into Human, Agent, and Run identity; request fields never establish identity." },
+      { "id": "decision-approval", "label": "Decision and approval", "focus": ["gateway", "authority", "store", "human", "web"], "note": "bouncer-v5 and risk-v1 decide from backend facts. Critical actions require distinct owner and independent-reviewer slots." },
+      { "id": "recheck-replay", "label": "Final recheck and replay", "focus": ["control", "gateway", "authority", "store", "action", "runtime"], "note": "The one-use claim is consumed, mutable authority is checked again next to the side effect, and an exact replay cannot execute twice." }
+    ]
+  },
+  "participants": [
+    { "id": "human", "type": "external", "label": "Human authority" },
+    { "id": "web", "type": "frontend", "label": "React UI" },
+    { "id": "control", "type": "backend", "label": "Fastify control" },
+    { "id": "runtime", "type": "cloud", "label": "Codex Runtime" },
+    { "id": "gateway", "type": "security", "label": "RuntimeGateway" },
+    { "id": "authority", "type": "security", "label": "Policy + approval" },
+    { "id": "store", "type": "database", "label": "JsonStore + audit" },
+    { "id": "action", "type": "backend", "label": "Protected action" }
+  ],
+  "segments": [
+    { "from": 140, "to": 252, "label": "Issue trusted Run identity" },
+    { "from": 258, "to": 392, "label": "Decide from backend facts" },
+    { "from": 398, "to": 476, "label": "Approve exact temporary authority" },
+    { "from": 482, "to": 646, "label": "Consume, recheck, execute, close" }
+  ],
+  "messages": [
+    { "from": "human", "to": "web", "y": 160, "label": "start Agent turn", "variant": "emphasis" },
+    { "from": "web", "to": "control", "y": 188, "label": "authenticated session + Agent", "variant": "emphasis" },
+    { "from": "control", "to": "runtime", "y": 216, "label": "launch Run + scoped TTL identity", "variant": "security" },
+    { "from": "runtime", "to": "gateway", "y": 244, "label": "agentctl action + Runtime credential", "variant": "security" },
+
+    { "from": "gateway", "to": "control", "y": 272, "label": "resolve trusted Human / Agent / Run", "variant": "security" },
+    { "from": "gateway", "to": "store", "y": 300, "label": "verify chain, idempotency, trusted facts", "variant": "security" },
+    { "from": "gateway", "to": "authority", "y": 328, "label": "evaluate bouncer-v5 + risk-v1", "variant": "emphasis" },
+    { "from": "authority", "to": "gateway", "y": 356, "label": "ALLOW / DENY / REQUIRE_APPROVAL", "variant": "return" },
+    { "from": "gateway", "to": "store", "y": 384, "label": "append redacted hash-chained evidence", "variant": "dashed" },
+
+    { "from": "human", "to": "authority", "y": 412, "label": "owner; + distinct reviewer if critical", "variant": "security" },
+    { "from": "authority", "to": "store", "y": 440, "label": "persist exact binding + one use", "variant": "emphasis" },
+    { "from": "runtime", "to": "gateway", "y": 468, "label": "retry same request + approval id", "variant": "security" },
+
+    { "from": "gateway", "to": "authority", "y": 496, "label": "atomically consume capability 1 → 0", "variant": "security" },
+    { "from": "gateway", "to": "store", "y": 524, "label": "final transaction: deny revocation race", "variant": "security" },
+    { "from": "gateway", "to": "action", "y": 552, "label": "execute only if recheck passes", "variant": "emphasis" },
+    { "from": "action", "to": "gateway", "y": 580, "label": "durable safe result", "variant": "return" },
+    { "from": "gateway", "to": "runtime", "y": 608, "label": "safe receipt; exact replay is inert", "variant": "return" },
+    { "from": "control", "to": "authority", "y": 636, "label": "Run terminal: revoke credential + claims", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "control", "from": 184, "to": 278, "type": "backend" },
+    { "participant": "runtime", "from": 212, "to": 616, "type": "cloud" },
+    { "participant": "gateway", "from": 240, "to": 616, "type": "security" },
+    { "participant": "authority", "from": 324, "to": 364, "type": "security" },
+    { "participant": "authority", "from": 408, "to": 448, "type": "security" },
+    { "participant": "authority", "from": 492, "to": 504, "type": "security" },
+    { "participant": "store", "from": 296, "to": 308, "type": "database" },
+    { "participant": "store", "from": 380, "to": 392, "type": "database" },
+    { "participant": "store", "from": 436, "to": 448, "type": "database" },
+    { "participant": "store", "from": 520, "to": 532, "type": "database" },
+    { "participant": "action", "from": 548, "to": 588, "type": "backend" }
+  ]
+}

@@ -2,206 +2,129 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "NawGate Runtime Architecture",
+    "title": "NawGate System Architecture",
+    "locale": "en",
     "output": "architecture.html",
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/CloudKai/CodeJam",
-      "revision": "fa3e9445a05c9b6d713f9fdaab89f5672901b62d"
+      "revision": "7c5b038ed2729d1298b1d58ea812d5b9f8a78a6a"
     },
-    "viewBox": [1100, 520],
     "views": [
-      {
-        "id": "protected-action-path",
-        "label": "Protected action path",
-        "focus": ["human", "web-ui", "control-plane", "run-orchestrator", "runtime", "runtime-gateway", "protected-actions", "state-audit"],
-        "note": "Follow a Human-triggered Run to one backend-enforced protected side effect and its safe evidence."
-      },
-      {
-        "id": "authorization-decision",
-        "label": "Authorization decision",
-        "focus": ["runtime", "runtime-gateway", "policy-risk", "approval-capabilities", "state-audit"],
-        "note": "See short-lived Run identity, deterministic policy and risk, approval, and exact one-use capability state."
-      },
-      {
-        "id": "runtime-boundaries",
-        "label": "Runtime boundaries",
-        "focus": ["run-orchestrator", "runtime", "agent-workspace", "model-provider", "runtime-gateway", "protected-actions"],
-        "note": "Protected resources stay outside the Agent workspace; the container is disposable but not claimed as hardened isolation."
-      }
+      { "id": "agent-run-path", "label": "Agent and Team Run path", "focus": ["human", "web-ui", "control-plane", "agent-coordination", "run-boundary", "codex-runtime", "model-provider", "agent-workspace", "state-evidence"], "note": "Follow an owner-scoped Playground request through solo or DAG execution and durable evidence." },
+      { "id": "protected-action-path", "label": "Protected action path", "focus": ["codex-runtime", "runtime-gateway", "policy-authority", "protected-actions", "state-evidence"], "note": "See the registered agentctl branch where RuntimeGateway enforces policy before a side effect." },
+      { "id": "trust-boundaries", "label": "Authority and custody", "focus": ["human", "control-plane", "run-boundary", "codex-runtime", "runtime-gateway", "policy-authority", "protected-actions", "agent-workspace"], "note": "Human, Agent, Run, protected data, and model-provider authority remain separate." }
     ]
   },
+  "layout": { "mode": "grid", "origin": [42, 50], "cols": 5, "gapX": 70, "gapY": 25, "cellW": 120, "cellH": 60 },
   "components": [
     {
-      "id": "human",
-      "type": "external",
-      "label": "Human operators",
-      "sublabel": "Owner / reviewer / demo actors",
-      "pos": [20, 120],
-      "size": [140, 72],
+      "id": "human", "type": "external", "label": "Human principals", "sublabel": "owner / reviewer", "tag": "User A / B / C", "row": 1, "col": 0,
       "sources": [
-        { "path": "apps/server/src/agentgate/demo-users.ts", "label": "Demo principals at pinned HEAD" }
+        { "path": "apps/server/src/nawgate/demo-users.ts", "label": "Demo principals" },
+        { "path": "apps/server/src/nawgate/identity-service.ts", "label": "Human sessions" }
       ]
     },
     {
-      "id": "web-ui",
-      "type": "frontend",
-      "label": "React Web UI",
-      "sublabel": "Playground + NawGate controls",
-      "pos": [200, 120],
-      "size": [150, 72],
+      "id": "web-ui", "type": "frontend", "label": "React Web UI", "sublabel": "Playground + evidence", "tag": "DAG / approval / audit", "row": 1, "col": 1,
       "sources": [
-        { "path": "apps/web/src/App.tsx", "label": "Application shell" },
-        { "path": "apps/web/src/components/agentgate/AgentGatePanel.tsx", "label": "Panel at pinned HEAD" }
+        { "path": "apps/web/src/App.tsx", "label": "Application surface" },
+        { "path": "apps/web/src/components/nawgate/NawGatePanel.tsx", "label": "NawGate panel" },
+        { "path": "apps/web/src/components/nawgate/TeamGraphVisualizer.tsx", "label": "DAG visualizer" }
       ]
     },
     {
-      "id": "control-plane",
-      "type": "backend",
-      "label": "Fastify control plane",
-      "sublabel": "Session, Agent and human APIs",
-      "pos": [380, 120],
-      "size": [160, 72],
+      "id": "control-plane", "type": "backend", "label": "Fastify API", "sublabel": "trusted session edge", "tag": "backend identity", "row": 1, "col": 2,
       "sources": [
-        { "path": "apps/server/src/app.ts", "label": "HTTP boundary" },
+        { "path": "apps/server/src/app.ts", "label": "HTTP boundaries" },
         { "path": "apps/server/src/index.ts", "label": "Service composition" }
       ]
     },
     {
-      "id": "run-orchestrator",
-      "type": "backend",
-      "label": "Run orchestrator",
-      "sublabel": "AgentService + Run identity",
-      "pos": [570, 120],
-      "size": [140, 72],
+      "id": "agent-coordination", "type": "backend", "label": "Agent + DAG control", "sublabel": "solo or same-owner Team", "tag": "dependency-ready layers", "row": 1, "col": 3,
       "sources": [
-        { "path": "apps/server/src/agent-service.ts", "label": "Agent and Run lifecycle" },
-        { "path": "apps/server/src/agentgate/middleware-runner.ts", "label": "Identity lifecycle at pinned HEAD" }
+        { "path": "apps/server/src/agent-service.ts", "label": "Agent ownership + routing" },
+        { "path": "apps/server/src/nawgate/team-orchestrator.ts", "label": "DAG planner" },
+        { "path": "apps/server/src/nawgate/team-dag-runner.ts", "label": "DAG execution" }
       ]
     },
     {
-      "id": "runtime",
-      "type": "cloud",
-      "label": "Disposable Codex Runtime",
-      "sublabel": "Agent process + agentctl",
-      "tag": "short-lived Run identity",
-      "pos": [740, 120],
-      "size": [170, 72],
+      "id": "run-boundary", "type": "security", "label": "Run boundary", "sublabel": "MiddlewareRunner", "tag": "short-lived identity", "row": 1, "col": 4,
       "sources": [
-        { "path": "apps/server/src/container-codex-runner.ts", "label": "Container runner" },
-        { "path": "apps/server/src/agentgate/agentctl.mjs", "label": "Protected-action client at pinned HEAD" }
+        { "path": "apps/server/src/nawgate/middleware-runner.ts", "label": "Run lifecycle" },
+        { "path": "apps/server/src/nawgate/runtime-credential-service.ts", "label": "Temporary credential" },
+        { "path": "apps/server/src/runner-factory.ts", "label": "Runner composition" }
       ]
     },
     {
-      "id": "runtime-gateway",
-      "type": "security",
-      "label": "RuntimeGateway",
-      "sublabel": "Policy enforcement point",
-      "tag": "fail closed + final recheck",
-      "pos": [740, 260],
-      "size": [170, 72],
+      "id": "codex-runtime", "type": "cloud", "label": "Codex Runtime", "sublabel": "local process / container", "tag": "agentctl client", "row": 2, "col": 4,
       "sources": [
-        { "path": "apps/server/src/agentgate/runtime-gateway.ts", "label": "Enforcement at pinned HEAD" },
-        { "path": "apps/server/src/runtime-api.test.ts", "label": "HTTP boundary regressions" }
+        { "path": "apps/server/src/codex-runner.ts", "label": "Local Runtime" },
+        { "path": "apps/server/src/container-codex-runner.ts", "label": "Container Runtime" },
+        { "path": "apps/server/src/nawgate/agentctl.mjs", "label": "Protected-action CLI" }
       ]
     },
     {
-      "id": "protected-actions",
-      "type": "security",
-      "label": "Protected actions",
-      "sublabel": "Resources + destination adapter",
-      "tag": "registered actions only",
-      "pos": [560, 260],
-      "size": [150, 72],
+      "id": "runtime-gateway", "type": "security", "label": "RuntimeGateway", "sublabel": "policy enforcement point", "tag": "fail closed + idempotent", "row": 2, "col": 3,
       "sources": [
-        { "path": "apps/server/src/agentgate/protected-resource-service.ts", "label": "Protected resources at pinned HEAD" },
-        { "path": "apps/server/src/agentgate/destination-catalogue.ts", "label": "Registered destinations at pinned HEAD" },
-        { "path": "apps/server/src/agentgate/local-destination-adapter.ts", "label": "Local side-effect adapter at pinned HEAD" }
+        { "path": "apps/server/src/nawgate/runtime-gateway.ts", "label": "Gateway enforcement" },
+        { "path": "apps/server/src/app.ts", "label": "Runtime API" }
       ]
     },
     {
-      "id": "state-audit",
-      "type": "database",
-      "label": "JsonStore + safe evidence",
-      "sublabel": "State, approvals, receipts, audit",
-      "pos": [560, 410],
-      "size": [170, 72],
+      "id": "protected-actions", "type": "security", "label": "Protected actions", "sublabel": "resources + destinations", "tag": "registered side effects", "row": 3, "col": 3,
       "sources": [
-        { "path": "apps/server/src/store.ts", "label": "Durable local state" },
-        { "path": "apps/server/src/agentgate/audit-service.ts", "label": "Redacted audit at pinned HEAD" }
+        { "path": "apps/server/src/nawgate/protected-resource-service.ts", "label": "Protected resources" },
+        { "path": "apps/server/src/nawgate/destination-catalogue.ts", "label": "Destination catalogue" },
+        { "path": "apps/server/src/nawgate/local-destination-adapter.ts", "label": "Synthetic adapter" }
       ]
     },
     {
-      "id": "model-provider",
-      "type": "external",
-      "label": "Model provider",
-      "sublabel": "Ark or OpenAI-compatible API",
-      "pos": [940, 120],
-      "size": [140, 68],
+      "id": "policy-authority", "type": "security", "label": "Policy + authority", "sublabel": "bouncer-v5 / risk-v1", "tag": "grants + approvals", "row": 2, "col": 2,
+      "sources": [
+        { "path": "apps/server/src/nawgate/policy-engine.ts", "label": "Policy decision" },
+        { "path": "apps/server/src/nawgate/risk-engine.ts", "label": "Risk decision" },
+        { "path": "apps/server/src/nawgate/approval-service.ts", "label": "One-use capability" }
+      ]
+    },
+    {
+      "id": "state-evidence", "type": "database", "label": "State + evidence", "sublabel": "JsonStore / audit / replay", "tag": "SHA-256 chain + DLP", "row": 2, "col": 0,
+      "sources": [
+        { "path": "apps/server/src/store.ts", "label": "Serialized JSON state" },
+        { "path": "apps/server/src/nawgate/audit-chain.ts", "label": "Audit integrity" },
+        { "path": "apps/server/src/nawgate/flight-recorder.ts", "label": "Sanitized replay" }
+      ]
+    },
+    {
+      "id": "agent-workspace", "type": "database", "label": "Agent workspace", "sublabel": "files + Codex session", "tag": "no protected payloads", "row": 3, "col": 4,
+      "sources": [
+        { "path": "apps/server/src/workspace.ts", "label": "Workspace custody" },
+        { "path": "apps/server/src/types.ts", "label": "Thread persistence" }
+      ]
+    },
+    {
+      "id": "model-provider", "type": "external", "label": "Model provider", "sublabel": "Ark / OpenAI-compatible", "tag": "Responses API", "row": 0, "col": 4,
       "sources": [
         { "path": "apps/server/src/config.ts", "label": "Provider configuration" },
-        { "path": "apps/server/src/codex-runner.ts", "label": "Codex process environment" }
-      ]
-    },
-    {
-      "id": "policy-risk",
-      "type": "security",
-      "label": "Policy + Risk",
-      "sublabel": "bouncer-v5 + risk-v1",
-      "tag": "deterministic decision",
-      "pos": [940, 260],
-      "size": [140, 68],
-      "sources": [
-        { "path": "apps/server/src/agentgate/policy-engine.ts", "label": "Policy decision at pinned HEAD" },
-        { "path": "apps/server/src/agentgate/risk-engine.ts", "label": "Risk decision at pinned HEAD" }
-      ]
-    },
-    {
-      "id": "approval-capabilities",
-      "type": "security",
-      "label": "Approval + capability",
-      "sublabel": "Owner / dual control / one use",
-      "pos": [740, 410],
-      "size": [170, 68],
-      "sources": [
-        { "path": "apps/server/src/agentgate/approval-service.ts", "label": "Claims at pinned HEAD" },
-        { "path": "apps/server/src/agentgate/approval-authority-service.ts", "label": "Approval authority at pinned HEAD" }
-      ]
-    },
-    {
-      "id": "agent-workspace",
-      "type": "database",
-      "label": "Agent workspace",
-      "sublabel": "Code and thread persistence",
-      "tag": "no protected payloads",
-      "pos": [555, 10],
-      "size": [170, 68],
-      "sources": [
-        { "path": "apps/server/src/workspace.ts", "label": "Workspace manager" },
-        { "path": "apps/server/src/workspace.test.ts", "label": "Persistence boundary tests" }
+        { "path": "apps/server/src/nawgate/team-orchestrator.ts", "label": "Optional DAG planning" }
       ]
     }
   ],
   "boundaries": [
-    {
-      "kind": "security-group",
-      "label": "Disposable Runtime boundary",
-      "wraps": ["runtime"],
-      "pad": 16
-    }
+    { "kind": "security-group", "label": "Trusted protected-action boundary", "wraps": ["runtime-gateway", "protected-actions", "policy-authority"], "pad": 18 }
   ],
   "connections": [
-    { "id": "human-to-web", "from": "human", "to": "web-ui", "variant": "emphasis" },
-    { "id": "web-to-api", "from": "web-ui", "to": "control-plane", "label": "session HTTP", "labelDy": -35, "variant": "emphasis" },
-    { "id": "api-to-run", "from": "control-plane", "to": "run-orchestrator", "variant": "emphasis" },
-    { "id": "run-to-runtime", "from": "run-orchestrator", "to": "runtime", "variant": "emphasis" },
-    { "id": "runtime-to-gateway", "from": "runtime", "to": "runtime-gateway", "label": "agentctl protected action", "labelDy": 24, "variant": "security", "fromSide": "bottom", "toSide": "top" },
-    { "id": "gateway-to-action", "from": "runtime-gateway", "to": "protected-actions", "label": "final recheck", "labelDy": -35, "variant": "security" },
-    { "id": "action-to-state", "from": "protected-actions", "to": "state-audit", "label": "safe receipt", "labelDy": 24, "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
-    { "id": "gateway-to-policy", "from": "runtime-gateway", "to": "policy-risk", "variant": "security" },
-    { "id": "gateway-to-approval", "from": "runtime-gateway", "to": "approval-capabilities", "label": "approval / claim", "labelDx": 100, "labelDy": 24, "variant": "security", "fromSide": "bottom", "toSide": "top" },
-    { "id": "run-to-workspace", "from": "run-orchestrator", "to": "agent-workspace", "label": "workspace + thread", "fromSide": "top", "toSide": "bottom" },
-    { "id": "runtime-to-provider", "from": "runtime", "to": "model-provider", "label": "Responses API", "labelDy": -70, "variant": "dashed" },
-    { "id": "gateway-to-state", "from": "runtime-gateway", "to": "state-audit", "label": "redacted audit", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
+    { "id": "human-to-web", "from": "human", "to": "web-ui", "label": "browser", "variant": "emphasis", "labelDy": 54 },
+    { "id": "web-to-control", "from": "web-ui", "to": "control-plane", "label": "session API", "variant": "security", "labelDy": -24 },
+    { "id": "control-to-agent", "from": "control-plane", "to": "agent-coordination", "label": "owned Agent", "variant": "emphasis", "labelDy": -24 },
+    { "id": "agent-to-run", "from": "agent-coordination", "to": "run-boundary", "label": "solo / DAG", "variant": "emphasis", "labelDy": -24 },
+    { "id": "run-to-runtime", "from": "run-boundary", "to": "codex-runtime", "label": "Run identity", "variant": "security", "labelAt": [903, 207] },
+    { "id": "runtime-to-model", "from": "codex-runtime", "to": "model-provider", "label": "Responses API", "fromSide": "right", "toSide": "right", "via": [[960, 250], [960, 80]] },
+    { "id": "runtime-to-workspace", "from": "codex-runtime", "to": "agent-workspace", "label": "project I/O", "labelAt": [862, 292] },
+    { "id": "runtime-to-gateway", "from": "codex-runtime", "to": "runtime-gateway", "label": "agentctl", "variant": "security", "labelDy": -24 },
+    { "id": "gateway-to-policy", "from": "runtime-gateway", "to": "policy-authority", "label": "evaluate", "variant": "security", "labelDy": 54 },
+    { "id": "state-to-policy", "from": "state-evidence", "to": "policy-authority", "label": "trusted facts", "variant": "dashed", "labelDy": 54 },
+    { "id": "gateway-to-actions", "from": "runtime-gateway", "to": "protected-actions", "label": "final recheck", "variant": "emphasis", "labelAt": [726, 292] },
+    { "id": "control-to-state", "from": "control-plane", "to": "state-evidence", "label": "persist + audit", "variant": "dashed", "labelAt": [360, 118] }
   ]
 }

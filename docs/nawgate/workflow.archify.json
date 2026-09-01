@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Agent and Team Run Workflow",
+    "locale": "en",
+    "output": "workflow.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "trusted-intake", "label": "Trusted intake", "focus": ["human", "submit", "ownership", "route"], "note": "The backend derives the human and Agent relationship before selecting an execution path." },
+      { "id": "team-dag", "label": "Team DAG path", "focus": ["route", "plan", "dag", "runtime-exec", "blackboard"], "note": "A validated or deterministic fallback DAG releases only dependency-ready same-owner tasks." },
+      { "id": "evidence-cleanup", "label": "Evidence and cleanup", "focus": ["runtime-exec", "blackboard", "persist", "cleanup", "result"], "note": "Run authority and capabilities close before the safe terminal state is persisted and returned." }
+    ]
+  },
+  "lanes": [
+    { "id": "human-ui", "label": "Human + Web UI" },
+    { "id": "agent-control", "label": "AgentService control" },
+    { "id": "team-dag", "label": "Coordination + Run" },
+    { "id": "evidence", "label": "State, evidence + cleanup" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "Intake", "fromCol": 0, "toCol": 1 },
+    { "id": "selection", "label": "Authorize + select", "fromCol": 2, "toCol": 2, "variant": "security" },
+    { "id": "execution", "label": "Execute + close", "fromCol": 3, "toCol": 5, "variant": "emphasis" }
+  ],
+  "groups": [
+    { "id": "coordination-path", "label": "Same-owner Team path", "lane": "team-dag", "fromCol": 1, "toCol": 4, "variant": "emphasis" },
+    { "id": "evidence-path", "label": "Durable safe evidence", "lane": "evidence", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["human", "submit", "ownership", "route", "plan", "dag", "runtime-exec", "cleanup", "persist", "result"],
+  "semanticChecks": {
+    "allowedRoots": ["human"],
+    "allowedTerminals": ["result", "denied", "blackboard"],
+    "requiredPaths": [
+      { "from": "human", "to": "result" },
+      { "from": "route", "to": "runtime-exec" },
+      { "from": "runtime-exec", "to": "cleanup" }
+    ]
+  },
+  "nodes": [
+    { "id": "human", "lane": "human-ui", "col": 0, "type": "external", "label": "Human owner", "width": 142 },
+    { "id": "submit", "lane": "human-ui", "col": 1, "type": "frontend", "label": "Submit DLP-checked turn", "width": 158 },
+    { "id": "result", "lane": "human-ui", "col": 5, "type": "frontend", "label": "Poll + render result", "width": 158 },
+    { "id": "ownership", "lane": "agent-control", "col": 1, "type": "security", "label": "Verify ownership", "width": 158 },
+    { "id": "route", "lane": "agent-control", "col": 2, "type": "backend", "label": "Choose solo or Team", "width": 158 },
+    { "id": "solo", "lane": "agent-control", "col": 4, "type": "backend", "label": "Queue solo Run", "width": 146 },
+    { "id": "plan", "lane": "team-dag", "col": 2, "type": "backend", "label": "Plan + validate Team DAG", "width": 166 },
+    { "id": "dag", "lane": "team-dag", "col": 3, "type": "messagebus", "label": "Release ready layer", "width": 176 },
+    { "id": "blackboard", "lane": "team-dag", "col": 1, "type": "database", "label": "Shared blackboard", "width": 166 },
+    { "id": "runtime-exec", "lane": "team-dag", "col": 4, "type": "cloud", "label": "MiddlewareRunner + Codex", "width": 166 },
+    { "id": "cleanup", "lane": "evidence", "col": 4, "type": "security", "label": "Revoke Run authority", "width": 166 },
+    { "id": "persist", "lane": "evidence", "col": 5, "type": "database", "label": "Persist safe evidence", "width": 158 },
+    { "id": "denied", "lane": "agent-control", "col": 0, "type": "security", "label": "Reject request", "width": 174 }
+  ],
+  "edges": [
+    { "id": "human-submit", "from": "human", "to": "submit", "label": "task", "variant": "emphasis", "role": "main" },
+    { "id": "submit-ownership", "from": "submit", "to": "ownership", "label": "session + sanitized prompt", "variant": "security", "role": "main" },
+    { "id": "ownership-route", "from": "ownership", "to": "route", "label": "owned + runnable", "variant": "security", "role": "main" },
+    { "id": "ownership-denied", "from": "ownership", "to": "denied", "label": "unknown / cross-user / busy", "variant": "security", "role": "error" },
+    { "id": "route-solo", "from": "route", "to": "solo", "label": "one eligible Agent", "variant": "default", "role": "branch" },
+    { "id": "route-plan", "from": "route", "to": "plan", "label": "multiple same-owner grants", "variant": "emphasis", "role": "main" },
+    { "id": "solo-runtime", "from": "solo", "to": "runtime-exec", "label": "single Run", "variant": "default", "role": "branch" },
+    { "id": "plan-dag", "from": "plan", "to": "dag", "label": "valid DAG or fallback", "variant": "emphasis", "role": "main" },
+    { "id": "dag-runtime", "from": "dag", "to": "runtime-exec", "label": "ready Runs", "variant": "emphasis", "role": "main" },
+    { "id": "dag-blackboard", "from": "dag", "to": "blackboard", "label": "publish artifacts + file paths", "variant": "dashed", "role": "async", "route": "bottom-channel" },
+    { "id": "runtime-cleanup", "from": "runtime-exec", "to": "cleanup", "label": "success / failure / cancel", "variant": "security", "role": "main" },
+    { "id": "cleanup-persist", "from": "cleanup", "to": "persist", "label": "sanitized terminal state", "variant": "dashed", "role": "main" },
+    { "id": "persist-result", "from": "persist", "to": "result", "label": "poll result", "variant": "emphasis", "role": "main" }
+  ]
+}
