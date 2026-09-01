@@ -85,8 +85,11 @@ protected actions through a trusted backend authorization boundary.
 
 [![NawGate architecture](docs/nawgate/architecture-share.png)](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
 
-Explore the [interactive NawGate architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
-or read the [GitHub-friendly architecture overview](docs/nawgate/architecture.md).
+Explore the interactive [system architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html),
+[Agent/Team Run workflow](https://cloudkai.github.io/CodeJam/nawgate/workflow.html),
+and [protected-action sequence](https://cloudkai.github.io/CodeJam/nawgate/sequence.html).
+GitHub-friendly companions are available for the [architecture](docs/nawgate/architecture.md),
+[workflow](docs/nawgate/workflow.md), and [sequence](docs/nawgate/sequence.md).
 
 ## Requirements
 
@@ -393,7 +396,7 @@ Deleting an Agent archives its workspace under `workspaces/.deleted/`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
 boundaries. For NawGate's current trust boundaries and policy semantics, use
-the [interactive architecture](docs/nawgate/architecture.html).
+the [interactive architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html).
 
 ## NawGate scope and limitations
 
@@ -401,8 +404,10 @@ NawGate currently protects registered protected actions routed through
 `agentctl` and `RuntimeGateway`. It does not intercept every Codex shell
 command, arbitrary local filesystem operation, or arbitrary network request.
 This is a single-process hackathon POC: it does not replace enterprise IAM,
-OIDC/SSO, production directory lifecycle, distributed authorization, full
-multi-Agent coordination, or hardened multi-tenant container isolation.
+OIDC/SSO, production directory lifecycle, distributed authorization, a
+distributed multi-Agent scheduler/queue, or hardened multi-tenant container
+isolation. Multi-Agent DAG planning, dependency-ready parallel execution, and
+shared blackboard state are implemented in-process only.
 
 Protected payloads are intentionally outside Agent workspaces, audit storage,
 and Delegation Receipts. The raw short-lived runtime credential is never shown
@@ -430,8 +435,12 @@ container engine completed it successfully.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [NawGate architecture (interactive)](docs/nawgate/architecture.html)
+- [NawGate architecture (interactive)](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
 - [NawGate architecture (Markdown)](docs/nawgate/architecture.md)
+- [NawGate workflow (interactive)](https://cloudkai.github.io/CodeJam/nawgate/workflow.html)
+- [NawGate workflow (Markdown)](docs/nawgate/workflow.md)
+- [NawGate sequence (interactive)](https://cloudkai.github.io/CodeJam/nawgate/sequence.html)
+- [NawGate sequence (Markdown)](docs/nawgate/sequence.md)
 - [NawGate decisions](docs/nawgate/decisions.md)
 - [NawGate standards alignment](docs/nawgate/standards.md)
 - [Local POC](docs/LOCAL_POC.md)
