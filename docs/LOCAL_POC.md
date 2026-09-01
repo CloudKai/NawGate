@@ -1,8 +1,10 @@
 # Local POC
 
 The local profile runs the React/Fastify control plane on macOS or Linux and
-starts every Codex turn in a disposable Docker, Colima, or Podman container.
-Only the selected Ark or OpenAI-compatible model API is remote.
+starts every Agent turn in a disposable Docker, Colima, or Podman container.
+The current Agent Runtime adapter is Codex CLI; only the selected Ark or
+OpenAI-compatible model API is remote. Codex is the Launchpad's current Runtime,
+not an architectural dependency of NawGate.
 
 ## Start
 
@@ -12,22 +14,51 @@ Requirements:
 - Docker, Colima, or Podman
 - An Ark or OpenAI-compatible API key and Responses-capable model
 
+Copy and edit the safe template:
+
 ```bash
-ARK_API_KEY=your-ark-api-key ARK_MODEL=ep-your-endpoint-id npm run poc
+test -f .env || cp .env.example .env
+openssl rand -hex 24
 ```
 
-OpenAI-compatible mode:
+Paste the generated value into `APP_AUTH_TOKEN`, then fill exactly one provider
+section.
+
+Ark:
+
+```dotenv
+MODEL_PROVIDER=ark
+ARK_API_KEY=your-ark-api-key
+ARK_MODEL=ep-your-endpoint-id
+```
+
+OpenAI-compatible:
+
+```dotenv
+MODEL_PROVIDER=openai-compatible
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=your-responses-capable-model-id
+OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+Load the file and start the complete POC:
 
 ```bash
-MODEL_PROVIDER=openai-compatible \
-OPENAI_API_KEY=your-openai-api-key \
-OPENAI_MODEL=gpt-5 \
-OPENAI_BASE_URL=https://api.openai.com/v1 \
+set -a
+source .env
+set +a
 npm run poc
 ```
 
 Open <http://localhost:3000>. Press `Ctrl+C` to stop the server and remove this
 instance's remaining Runtime containers.
+
+Leave `APP_DATA_DIR`, `AGENT_WORKSPACE_ROOT`, `CODEX_HOME`,
+`NAWGATE_GATEWAY_URL`, `CONTAINER_ENGINE`, and `RUNTIME_INSTANCE_ID` commented
+unless intentionally overriding them. The POC selects safe host paths, a
+container-reachable gateway, an available engine, and an instance-specific ID.
+Codex CLI and `agentctl` are already installed in the Runtime image; no host
+Codex installation is required.
 
 Force an engine with `CONTAINER_ENGINE=docker` or
 `CONTAINER_ENGINE=podman`. Colima uses the Docker CLI.
@@ -96,11 +127,10 @@ podman run --rm docker.io/library/alpine:3.20 echo PODMAN_OK
 `podman info` must report `rootless: true`. Start the POC:
 
 ```bash
-CONTAINER_ENGINE=podman \
-APP_AUTH_TOKEN=techjam-local-demo-token-123456 \
-ARK_API_KEY=your-ark-api-key \
-ARK_MODEL=ep-your-endpoint-id \
-npm run poc
+set -a
+source .env
+set +a
+CONTAINER_ENGINE=podman npm run poc
 ```
 
 This flow was verified on veLinux 2 with rootless Podman 4.3.1. A `vfs` storage
@@ -110,10 +140,10 @@ build.
 ## Common options
 
 ```bash
-CONTAINER_RUNTIME_APT_PACKAGES='ca-certificates git ripgrep python3 build-essential' \
-ARK_API_KEY=your-ark-api-key \
-ARK_MODEL=ep-your-endpoint-id \
-npm run poc
+set -a
+source .env
+set +a
+CONTAINER_RUNTIME_APT_PACKAGES='ca-certificates git ripgrep python3 build-essential' npm run poc
 ```
 
 For restricted networks, configure:
@@ -138,6 +168,11 @@ curl http://localhost:3000/api/system
 If a bind mount is rejected, set `LOCAL_POC_DATA_ROOT` to a directory shared
 with the container VM. On Linux, the startup script automatically uses the host
 UID/GID and validates workspace write access.
+
+If startup tries to create `/app` or the Runtime cannot reach
+`http://127.0.0.1:3000`, the local `.env` predates the safe template. Remove or
+comment the active `/app` path variables and `NAWGATE_GATEWAY_URL`; those values
+are selected automatically for the POC.
 
 Remove only the default Runtime image:
 

@@ -13,6 +13,18 @@ NawGate's backend-enforced delegated-access demo requires Node.js 22 or newer
 and a running Docker, Colima, or Podman engine. The model provider may be Ark
 or an OpenAI-compatible provider.
 
+From the repository root, create `.env` once if it does not already exist:
+
+```bash
+test -f .env || cp .env.example .env
+openssl rand -hex 24
+```
+
+Paste the generated value into `APP_AUTH_TOKEN`, choose `MODEL_PROVIDER=ark`
+or `MODEL_PROVIDER=openai-compatible`, and fill the matching key/model fields.
+The current template deliberately leaves host paths, gateway, engine, and
+Runtime instance ID unset so the POC can choose safe values.
+
 ### macOS with Homebrew
 
 Install Node.js 22 once if it is not already installed:
@@ -25,18 +37,12 @@ From the repository root, run:
 
 ```bash
 export PATH="$(brew --prefix node@22)/bin:$PATH"
-rehash
+hash -r
 node --version
 
 set -a
 source .env
 set +a
-
-unset APP_DATA_DIR
-unset AGENT_WORKSPACE_ROOT
-unset CODEX_HOME
-unset CODEX_BIN
-unset NAWGATE_GATEWAY_URL
 
 npm run poc
 ```
@@ -52,12 +58,6 @@ nvm use 22
 set -a
 source .env
 set +a
-
-unset APP_DATA_DIR
-unset AGENT_WORKSPACE_ROOT
-unset CODEX_HOME
-unset CODEX_BIN
-unset NAWGATE_GATEWAY_URL
 
 npm run poc
 ```
