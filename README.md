@@ -83,11 +83,11 @@ Runtime cannot assert any of them. See the
 NawGate separates Human, Agent, and Run authority and enforces registered
 protected actions through a trusted backend authorization boundary.
 
-[![NawGate architecture](docs/nawgate/architecture-share.png)](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
+[![NawGate architecture](docs/nawgate/architecture-share.png)](https://cloudkai.github.io/NawGate/docs/nawgate/architecture.html)
 
-Explore the interactive [system architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html),
-[Agent/Team Run workflow](https://cloudkai.github.io/CodeJam/nawgate/workflow.html),
-and [protected-action sequence](https://cloudkai.github.io/CodeJam/nawgate/sequence.html).
+Explore the interactive [system architecture](https://cloudkai.github.io/NawGate/docs/nawgate/architecture.html),
+[Agent/Team Run workflow](https://cloudkai.github.io/NawGate/docs/nawgate/workflow.html),
+and [protected-action sequence](https://cloudkai.github.io/NawGate/docs/nawgate/sequence.html).
 GitHub-friendly companions are available for the [architecture](docs/nawgate/architecture.md),
 [workflow](docs/nawgate/workflow.md), and [sequence](docs/nawgate/sequence.md).
 
@@ -396,7 +396,7 @@ Deleting an Agent archives its workspace under `workspaces/.deleted/`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
 boundaries. For NawGate's current trust boundaries and policy semantics, use
-the [interactive architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html).
+the [interactive architecture](https://cloudkai.github.io/NawGate/docs/nawgate/architecture.html).
 
 ## NawGate scope and limitations
 
@@ -435,11 +435,11 @@ container engine completed it successfully.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [NawGate architecture (interactive)](https://cloudkai.github.io/CodeJam/nawgate/architecture.html)
+- [NawGate architecture (interactive)](https://cloudkai.github.io/NawGate/docs/nawgate/architecture.html)
 - [NawGate architecture (Markdown)](docs/nawgate/architecture.md)
-- [NawGate workflow (interactive)](https://cloudkai.github.io/CodeJam/nawgate/workflow.html)
+- [NawGate workflow (interactive)](https://cloudkai.github.io/NawGate/docs/nawgate/workflow.html)
 - [NawGate workflow (Markdown)](docs/nawgate/workflow.md)
-- [NawGate sequence (interactive)](https://cloudkai.github.io/CodeJam/nawgate/sequence.html)
+- [NawGate sequence (interactive)](https://cloudkai.github.io/NawGate/docs/nawgate/sequence.html)
 - [NawGate sequence (Markdown)](docs/nawgate/sequence.md)
 - [NawGate decisions](docs/nawgate/decisions.md)
 - [NawGate standards alignment](docs/nawgate/standards.md)

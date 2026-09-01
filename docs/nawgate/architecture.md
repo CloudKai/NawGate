@@ -5,7 +5,7 @@ It keeps Human, Agent, and Run authority separate while preserving normal solo
 and multi-Agent Playground execution. This document describes the code at
 revision `7c5b038ed2729d1298b1d58ea812d5b9f8a78a6a`.
 
-Explore the [interactive system architecture](https://cloudkai.github.io/CodeJam/nawgate/architecture.html),
+Explore the [interactive system architecture](https://cloudkai.github.io/NawGate/docs/nawgate/architecture.html),
 the [Agent/Team Run workflow](workflow.md), or the
 [protected-action sequence](sequence.md).
 
@@ -68,7 +68,7 @@ Team enrollment never bypasses cross-user Agent isolation. The participating
 Agents must be owned by the authenticated human and have active grants for the
 same team.
 
-See the [interactive workflow](https://cloudkai.github.io/CodeJam/nawgate/workflow.html)
+See the [interactive workflow](https://cloudkai.github.io/NawGate/docs/nawgate/workflow.html)
 or its [GitHub-readable companion](workflow.md).
 
 ### Registered protected actions
@@ -85,7 +85,7 @@ Run-bound, one-use capability after eligible human decisions; critical actions
 require distinct owner and independent-reviewer approvals. Approval never
 repairs a hard deny. Replay and revocation races fail closed.
 
-See the [interactive sequence](https://cloudkai.github.io/CodeJam/nawgate/sequence.html)
+See the [interactive sequence](https://cloudkai.github.io/NawGate/docs/nawgate/sequence.html)
 or its [GitHub-readable companion](sequence.md).
 
 ## Data and state

@@ -4,7 +4,7 @@ This sequence covers only registered actions sent through `agentctl` and
 `RuntimeGateway`. It does not claim to intercept arbitrary Codex shell,
 filesystem, or network operations.
 
-Explore the [interactive sequence](https://cloudkai.github.io/CodeJam/nawgate/sequence.html).
+Explore the [interactive sequence](https://cloudkai.github.io/NawGate/docs/nawgate/sequence.html).
 For broader boundaries, see the [architecture overview](architecture.md).
 
 ## GitHub fallback

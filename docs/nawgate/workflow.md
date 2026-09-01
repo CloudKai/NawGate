@@ -4,7 +4,7 @@ This workflow shows how the current backend accepts a Playground prompt, keeps
 Agent ownership scoped to the authenticated human, selects solo or multi-Agent
 execution, and persists safe operational evidence.
 
-Explore the [interactive workflow](https://cloudkai.github.io/CodeJam/nawgate/workflow.html).
+Explore the [interactive workflow](https://cloudkai.github.io/NawGate/docs/nawgate/workflow.html).
 For system boundaries, see the [architecture overview](architecture.md). For a
 registered protected action requested during a Run, see the
 [protected-action sequence](sequence.md).
