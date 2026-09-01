@@ -170,12 +170,16 @@ flowchart LR
 | Agent lifecycle and multi-turn continuity | Follow [workspace persistence](docs/nawgate/demo.md#2-workspace-persistence-and-dlp). | Two successful Runs reuse one workspace and Codex thread. |
 | Deterministic DLP | Submit the sample key/email prompt in the [DLP step](docs/nawgate/demo.md#2-workspace-persistence-and-dlp). | UI and persisted evidence contain redaction markers, not the submitted secret/PII. |
 | Owner allow and cross-user hard deny | Run the [authorization checks](docs/nawgate/demo.md#5-authorization-and-approval-through-the-ui). | RuntimeGateway records ALLOW/SUCCESS for `project-a` and DENY/no side effect for `project-b`. |
-| Approval and one-use authority | Run the [JIT approval and replay checks](docs/nawgate/demo.md#5-authorization-and-approval-through-the-ui). | Wrong user cannot approve; owner approval issues and consumes one exact claim; replay cannot execute twice. |
+| Approval and one-use authority | Run the [restricted JIT approval](docs/nawgate/demo.md#5-authorization-and-approval-through-the-ui). | Owner approval issues and consumes one exact claim; JIT succeeds once without changing the persistent Viewer role. |
 | Team DAG and blackboard | Run the [Team execution workflow](docs/nawgate/demo.md#4-multi-agent-execution-graph-and-blackboard). | Validated DAG, dependency-ready tasks, per-Agent output, and shared artifacts appear. |
 | Team grant and restricted-file JIT | Follow [Team enrollment](docs/nawgate/demo.md#3-team-membership-and-agent-enrollment) and the Security Lab JIT flow. | Viewer remains viewer; exact temporary file authority succeeds once. |
-| Revocation race protection | Run the [extended revocation checks](docs/nawgate/demo.md#extended-abuse-and-revocation-checks). | Initially allowed queued action becomes terminal DENY with no side effect. |
+| Revocation race protection | In the [Security Lab](docs/nawgate/demo.md#5-authorization-and-approval-through-the-ui), run **Queued after revoke**. | Initially allowed queued action becomes terminal DENY with no side effect. |
 | Audit integrity and flight replay | Follow [audit and replay](docs/nawgate/demo.md#6-audit-evidence-and-replay). | Integrity state, hash-linked redacted events, and owner-only sanitized Run replay are visible. |
-| Full fail-closed scenario set | Run the [extended abuse checks](docs/nawgate/demo.md#extended-abuse-and-revocation-checks). | Real-gateway allow, deny, forged input, replay, and Run/grant revocation results appear. |
+| Full fail-closed scenario set | In the [Security Lab](docs/nawgate/demo.md#5-authorization-and-approval-through-the-ui), run forged-input, replay, and Run/grant revocation checks. | Real-gateway denial and revocation evidence appears without a protected side effect. |
+
+For the required three-minute recording, use sections 1, 2, 5, and 6 of the
+demo guide. Treat the Team membership and DAG sections as an extended path when
+additional time is available.
 
 ## Quick start: complete judge demo
 

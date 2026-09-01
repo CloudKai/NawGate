@@ -1,9 +1,7 @@
 # NawGate Demo Steps
 
-For the required three-minute demonstration, use sections 1, 2, 5, and 6 to
-show a real Agent Run, DLP, an allowed action, a hard denial, approval, and
-audit evidence. Add sections 3 and 4 plus the extended abuse checks when four
-to five minutes are available.
+Use these steps to repeat the NawGate demo in approximately four to five
+minutes.
 
 ## Before recording
 
@@ -98,33 +96,17 @@ one Agent can cause one task to fail.
 
 4. Click **Alpha restricted JIT**.
 5. Wait for `REQUIRE_APPROVAL`.
-6. Optionally switch to User B and confirm the request cannot be approved by
-   the wrong user. Return to User A.
-7. Approve the request in **Needs your approval**.
-8. Return to the Security Lab result and click **Complete approved JIT**.
-9. Confirm the action succeeds once and the persistent Viewer role remains
-   unchanged.
-
-### Extended abuse and revocation checks
-
-Run these after the core path when time permits:
-
-1. Click **Forged admin** and confirm the backend ignores the untrusted role
-   and Team claims.
-2. Click **Replay capability** and confirm the first use succeeds while replay
-   is denied.
-3. Click **Revoke Run** and confirm the follow-up action is denied.
-4. Click **Queued after revoke** and confirm an initially allowed action is
-   denied by the final recheck with no side effect.
-5. Click **Revoke grant** last and confirm follow-up Team access fails closed.
+6. Approve the request in **Needs your approval**.
+7. Return to the Security Lab result and click **Complete approved JIT**.
+8. Confirm the action succeeds once and the persistent Viewer role remains unchanged.
 
 ## 6. Audit evidence and replay
 
 1. Open **Audit Timeline** and confirm the status is **Verified**.
 2. Find a completed real Playground Run.
 3. Click **Replay**.
-4. Show the sanitized prompt and output, duration, token usage, and policy
-   decision trail.
+
+4. Show the sanitized prompt and output, duration, token usage, and policy decision trail.
 
 Use a completed normal Playground Run for Replay. Security Lab scenarios are
 synthetic security checks and may not create a Playground flight recording.
